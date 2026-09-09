@@ -5,7 +5,7 @@ boto3==1.20.14
 botocore==1.23.14
 click==8.0.3
 Deprecated==1.2.13
-h11==0.12.0
+h11==0.16.0
 h2==4.1.0
 hpack==4.0.0
 hypercorn==0.12.0
