@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Nunito Sans", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  --color-latte-rosewater: #dc8a78;
+  --color-latte-flamingo: #dd7878;
+  --color-latte-pink: #ea76cb;
+  --color-latte-mauve: #8839ef;
+  --color-latte-red: #d20f39;
+  --color-latte-maroon: #e64553;
+  --color-latte-peach: #fe640b;
+  --color-latte-yellow: #df8e1d;
+  --color-latte-green: #40a02b;
+  --color-latte-teal: #179299;
+  --color-latte-sky: #04a5e5;
+  --color-latte-sapphire: #209fb5;
+  --color-latte-blue: #1e66f5;
+  --color-latte-lavender: #7287fd;
+  --color-latte-text: #4c4f69;
+  --color-latte-subtext1: #5c5f77;
+  --color-latte-subtext0: #6c6f85;
+  --color-latte-overlay2: #7c7f93;
+  --color-latte-overlay1: #8c8fa1;
+  --color-latte-overlay0: #9ca0b0;
+  --color-latte-surface2: #acb0be;
+  --color-latte-surface1: #bcc0cc;
+  --color-latte-surface0: #ccd0da;
+  --color-latte-base: #eff1f5;
+  --color-latte-mantle: #e6e9ef;
+  --color-latte-crust: #dce0e8;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+
+  :focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-latte-blue) 45%, transparent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .control {
+    width: 100%;
+    border: 1px solid var(--color-latte-surface1);
+    border-radius: 0.75rem;
+    background: white;
+    padding: 0.75rem 0.875rem;
+    color: var(--color-latte-text);
+  }
+
+  .control:hover {
+    border-color: var(--color-latte-overlay0);
+  }
+}

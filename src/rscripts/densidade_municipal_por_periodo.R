@@ -79,7 +79,16 @@ municipios_com_casos <- dados_processados %>%
   group_by(across(all_of(c("codmunres", "mun_res_nome")))) %>%
   tally() # Now summarise with unique elements
 
-projecao_populacional <- read.csv("./data/static/populacao-estimada-2020.csv")
+population_data_path <- Sys.getenv(
+  "ENCELADUS_POPULATION_DATA_PATH",
+  "./data/static/population.csv"
+)
+
+if (!file.exists(population_data_path)) {
+  stop(paste("Population data file not found:", population_data_path))
+}
+
+projecao_populacional <- read.csv(population_data_path)
 
 projecao_populacional$city_ibge_code <- as.character(
   substr(projecao_populacional$city_ibge_code, 1, 6)

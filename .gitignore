@@ -1,5 +1,14 @@
 **/venv
+.venv/
+.env
 /output
 /**/*:Zone.identifier
 **/__pycache__
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+*.tsbuildinfo
+web/.next/
+web/node_modules/
+web/out/
 src/data/static/populacao-estimada-2020.csv

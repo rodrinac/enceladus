@@ -1,0 +1,44 @@
+name: enceladus-production
+
+services:
+  app:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    env_file: .env
+    environment:
+      AWS_DEFAULT_REGION: eu-west-1
+      AWS_REGION: eu-west-1
+      ENCELADUS_POPULATION_DATA_PATH: /var/lib/enceladus/data/population.csv
+      REDIS_HOST: redis
+    depends_on:
+      population-data:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    volumes:
+      - /srv/enceladus/population:/var/lib/enceladus/data:ro
+      - /srv/enceladus/reports:/var/lib/enceladus/relatorios
+
+  population-data:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    command: ["python", "/app/docker/ibge/fetch_population.py"]
+    env_file: .env
+    restart: "no"
+    user: "0:0"
+    volumes:
+      - /srv/enceladus/population:/data
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--appendonly", "yes"]
+    env_file: .env
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    volumes:
+      - /srv/enceladus/redis:/data

@@ -1,19 +1,17 @@
-from send_email import send_email
-from subprocess import Popen, PIPE, STDOUT
-import storage
 import logging
-from pathlib import Path
-import os.path
-import os
+from subprocess import PIPE, STDOUT, Popen
+
+import storage
+from send_email import send_email
+from settings import SOURCE_ROOT, settings
 
 logger = logging.getLogger(__name__)
 
-relatorios_folder = os.path.join(
-    Path.home(), '.enceladus', 'relatorios', 'queimaduras', 'casos-mensais-por-municipio-por-estado')
+relatorios_folder = settings.reports_dir / "queimaduras" / "casos-mensais-por-municipio-por-estado"
 
 id_relatorio = 'CASOS_MENSAIS_POR_MUNICIPIO_POR_ESTADO'
 
-os.makedirs(relatorios_folder, exist_ok=True)
+relatorios_folder.mkdir(parents=True, exist_ok=True)
 
 
 def _formatar_intervalo(ano_inicio: int, ano_fim: int):
@@ -24,23 +22,23 @@ def _formatar_intervalo(ano_inicio: int, ano_fim: int):
 
 
 def ler_relatorio(relatorio: str):
-    with open(os.path.join(relatorios_folder, relatorio), 'rb') as f:
+    with (relatorios_folder / relatorio).open('rb') as f:
         return f.read()
 
 def preparar_e_enviar_diagrama_async(estados: str, ano_inicio: str, ano_fim: str, email: str, id_requisicao: str):
 
-    logger.info(f'Obtendo registros de queimaduras para %s %s.',
+    logger.info('Obtendo registros de queimaduras para %s %s.',
                 estados, _formatar_intervalo(ano_inicio, ano_fim))
 
-    file_path = os.path.join(
-        relatorios_folder, f'{"-".join(estados)}.{ano_inicio}.{ano_fim}.pdf')
-    working_path = os.path.join(relatorios_folder, id_requisicao, '')
+    file_path = relatorios_folder / f'{"-".join(estados)}.{ano_inicio}.{ano_fim}.pdf'
+    working_path = relatorios_folder / id_requisicao
 
-    os.makedirs(working_path, exist_ok=True)
+    working_path.mkdir(parents=True, exist_ok=True)
 
-    if not os.path.exists(file_path):
-        p = Popen(['Rscript', 'rscripts/casos_mensais_por_municipio_por_estado.R', ','.join(estados),
-                   ano_inicio, ano_fim, file_path, working_path], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+    if not file_path.exists():
+        p = Popen(['Rscript', settings.r_scripts_dir / 'casos_mensais_por_municipio_por_estado.R', ','.join(estados),
+                   ano_inicio, ano_fim, file_path, working_path], stdout=PIPE, stdin=PIPE,
+                   stderr=STDOUT, cwd=SOURCE_ROOT)
 
         streamdata = p.communicate()[0]
 
@@ -50,14 +48,11 @@ def preparar_e_enviar_diagrama_async(estados: str, ano_inicio: str, ano_fim: str
         if (p.returncode != 0):
             return
 
-        storage.salvar_data_processamento(id_relatorio, os.path.basename(file_path))
+        storage.salvar_data_processamento(id_relatorio, file_path.name)
 
-    logger.info('Executou comando R com status %s.', p.returncode)
+    logger.info('Preparando para envio do diagrama de %s em %s com destinatário a %s.', estados, [
+                ano_inicio, ano_fim], email)
 
-    if (p.returncode == 0):
-        logger.info('Preparando para envio do diagrama de %s em %s com destinatário a %s.', estados, [
-                    ano_inicio, ano_fim], email)
-
-        with open(file_path, 'rb') as f:
-            send_email(
-                email, f'Diagrama de distribuição do local de falecimento para {", ".join(estados)}, {_formatar_intervalo(ano_inicio, ano_fim)}', 'relatorio.pdf', f.read())
+    with file_path.open('rb') as f:
+        send_email(
+            email, f'Diagrama de distribuição do local de falecimento para {", ".join(estados)}, {_formatar_intervalo(ano_inicio, ano_fim)}', 'relatorio.pdf', f.read())

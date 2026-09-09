@@ -1,19 +1,18 @@
-import os
 import logging
 import shutil
+from subprocess import PIPE, STDOUT, Popen
+
 import storage
-from pathlib import Path
-from subprocess import Popen, PIPE, STDOUT
 from send_email import send_email
+from settings import SOURCE_ROOT, settings
 
 logger = logging.getLogger(__name__)
 
-relatorios_folder = os.path.join(
-    Path.home(), '.enceladus', 'relatorios', 'queimaduras', 'densidade-municipal-por-periodo')
+relatorios_folder = settings.reports_dir / "queimaduras" / "densidade-municipal-por-periodo"
 
 id_relatorio = 'DENSIDADE_MUNICIPAL_POR_PERIODO'
 
-os.makedirs(relatorios_folder, exist_ok=True)
+relatorios_folder.mkdir(parents=True, exist_ok=True)
 
 
 def _formatar_intervalo(data_inicio: str, data_fim: str):
@@ -23,23 +22,24 @@ def _formatar_intervalo(data_inicio: str, data_fim: str):
     return f'entre {data_inicio} e {data_fim}'
 
 def ler_relatorio(relatorio: str):
-    with open(os.path.join(relatorios_folder, relatorio), 'rb') as f:
+    with (relatorios_folder / relatorio).open('rb') as f:
         return f.read()
 
 
 def preparar_e_enviar_relatorio_async(estado: str, data_inicio: str, data_fim: str, email: str, id_requisicao: str):
 
-    logger.info(f'Obtendo registros de queimaduras para %s %s.',
+    logger.info('Obtendo registros de queimaduras para %s %s.',
                 estado, _formatar_intervalo(data_inicio, data_fim))
 
-    file_path = os.path.join(relatorios_folder, f'{estado}.{data_inicio}.{data_fim}.pdf')
-    working_path = os.path.join(relatorios_folder, id_requisicao, '')
+    file_path = relatorios_folder / f'{estado}.{data_inicio}.{data_fim}.pdf'
+    working_path = relatorios_folder / id_requisicao
 
-    os.makedirs(working_path, exist_ok=True)
+    working_path.mkdir(parents=True, exist_ok=True)
 
-    if not os.path.exists(file_path):
-        p = Popen(['Rscript', 'rscripts/densidade_municipal_por_periodo.R', estado,
-                  data_inicio, data_fim, file_path, working_path], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+    if not file_path.exists():
+        p = Popen(['Rscript', settings.r_scripts_dir / 'densidade_municipal_por_periodo.R', estado,
+                  data_inicio, data_fim, file_path, working_path], stdout=PIPE, stdin=PIPE,
+                  stderr=STDOUT, cwd=SOURCE_ROOT)
 
         streamdata = p.communicate()[0]
 
@@ -49,7 +49,7 @@ def preparar_e_enviar_relatorio_async(estado: str, data_inicio: str, data_fim: s
         if (p.returncode != 0):
             return
         
-        storage.salvar_data_processamento(id_relatorio, os.path.basename(file_path))
+        storage.salvar_data_processamento(id_relatorio, file_path.name)
 
     
     shutil.rmtree(working_path, ignore_errors=True)
@@ -57,6 +57,6 @@ def preparar_e_enviar_relatorio_async(estado: str, data_inicio: str, data_fim: s
     logger.info('Preparando para envio do diagrama de %s em %s com destinatário a %s.', estado, [
                 data_inicio, data_fim], email)
 
-    with open(file_path, 'rb') as f:
+    with file_path.open('rb') as f:
         send_email(
             email, f'Relatório de densidade municipal por período - {estado}, {_formatar_intervalo(data_inicio, data_fim)}', 'relatorio_densidade_municipal.pdf', f.read())
