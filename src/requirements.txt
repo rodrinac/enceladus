@@ -18,7 +18,7 @@ priority==2.0.0
 pycodestyle==2.8.0
 python-dateutil==2.8.2
 PyYAML==6.0
-quart==0.16.1
+quart==0.20.0
 Quart-CORS==0.5.0
 redis==4.0.2
 s3transfer==0.5.0
