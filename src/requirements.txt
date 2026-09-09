@@ -24,7 +24,7 @@ redis==4.0.2
 s3transfer==0.5.0
 six==1.16.0
 toml==0.10.2
-urllib3==1.26.7
+urllib3==2.7.0
 Werkzeug==2.0.2
 wrapt==1.13.3
 wsproto==1.0.0
