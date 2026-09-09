@@ -10,7 +10,8 @@ if [[ ! $image_ref =~ ^[0-9]+\.dkr\.ecr\.eu-west-1\.amazonaws\.com/[a-z0-9._/-]+
   exit 2
 fi
 
-# shellcheck disable=SC1091 -- this file is provisioned by CloudFormation on the host.
+# This file is provisioned by CloudFormation on the host.
+# shellcheck disable=SC1091
 source "$repository_root/runtime.env"
 
 source_base="https://raw.githubusercontent.com/$SOURCE_REPOSITORY/$SOURCE_REF/deploy"
