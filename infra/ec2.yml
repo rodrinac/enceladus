@@ -502,5 +502,5 @@ Outputs:
     Description: Set this as the ECR_REPOSITORY_URI GitHub production variable
     Value: !GetAtt ImageRepository.RepositoryUri
   GitHubDeployRoleArn:
-    Description: Set this as the AWS_DEPLOY_ROLE_ARN GitHub production secret
+    Description: Set this as the AWS_DEPLOY_ROLE_ANR GitHub production secret
     Value: !GetAtt GitHubDeployRole.Arn

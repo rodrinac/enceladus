@@ -45,7 +45,7 @@ optional; leave `SesConfigurationSet` empty unless one already exists.
 Create a protected GitHub environment named `production`. Add the deployment role as
 an environment secret and the remaining values as environment variables:
 
-- Secret `AWS_DEPLOY_ROLE_ARN` from `GitHubDeployRoleArn`
+- Secret `AWS_DEPLOY_ROLE_ANR` from `GitHubDeployRoleArn`
 - `EC2_INSTANCE_ID` from `InstanceId`
 - `ECR_REPOSITORY_URI` from `EcrRepositoryUri`
 
