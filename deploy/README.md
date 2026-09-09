@@ -42,10 +42,10 @@ optional; leave `SesConfigurationSet` empty unless one already exists.
 
 ## Configure GitHub
 
-Create a protected GitHub environment named `production`, then add these environment
-variables from the corresponding stack outputs:
+Create a protected GitHub environment named `production`. Add the deployment role as
+an environment secret and the remaining values as environment variables:
 
-- `AWS_DEPLOY_ROLE_ARN` from `GitHubDeployRoleArn`
+- Secret `AWS_DEPLOY_ROLE_ARN` from `GitHubDeployRoleArn`
 - `EC2_INSTANCE_ID` from `InstanceId`
 - `ECR_REPOSITORY_URI` from `EcrRepositoryUri`
 
