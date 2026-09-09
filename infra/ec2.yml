@@ -54,6 +54,16 @@ Parameters:
     Type: String
     Default: rodrinac/enceladus
     AllowedPattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+  GitHubRepositoryOwnerId:
+    Type: String
+    Default: "16602151"
+    AllowedPattern: ^[0-9]+$
+    Description: Immutable GitHub owner ID used by GitHub OIDC subject claims
+  GitHubRepositoryId:
+    Type: String
+    Default: "393819551"
+    AllowedPattern: ^[0-9]+$
+    Description: Immutable GitHub repository ID used by GitHub OIDC subject claims
   GitHubOidcProviderArn:
     Type: String
     Default: ""
@@ -455,7 +465,8 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:production
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:*@${GitHubRepositoryOwnerId}/*@${GitHubRepositoryId}:environment:production
       Policies:
         - PolicyName: BuildAndDeploy
           PolicyDocument:
