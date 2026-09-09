@@ -46,14 +46,14 @@ aws ecr get-login-password --region "$region" \
 
 cd "$repository_root"
 docker compose pull
-docker compose up --detach --remove-orphans
+docker compose up --detach --remove-orphans --wait --wait-timeout 120
 
 if ! curl --fail --retry 12 --retry-delay 5 --retry-connrefused \
   http://127.0.0.1:8000/health; then
   if [[ -n $previous_image && $previous_image != "$image_ref" ]]; then
     sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$previous_image|" "$repository_root/.env"
     docker compose pull
-    docker compose up --detach --remove-orphans
+    docker compose up --detach --remove-orphans --wait --wait-timeout 120
   fi
   echo "Deployment failed health checks; previous image restored" >&2
   exit 1
