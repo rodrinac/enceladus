@@ -1,61 +1,96 @@
-# enceladus big data
+# Enceladus Big Data
 
 ## O que é?
 
-**Enceladus Big Data** é um sistema criado para ajudar pesquisadores da **Sociedade Brasileira de Queimaduras (SBQ)** na coleta, processamento e distribuição de dados brutos em informações úteis por meio da linguagem R, Python e demais bibliotecas que auxiliam na manipulação dos registros.
+O Enceladus Big Data ajuda pesquisadores da Sociedade Brasileira de Queimaduras (SBQ) a
+coletar, processar e transformar dados brutos em relatórios úteis. O stack combina uma
+interface Next.js, uma API Quart e processamento estatístico em R.
 
-## Colaboradores
+Desenvolvido por [José Inácio Rodrigues da Silva](https://github.com/josersinacio) e
+[Josué de Paulo Viana](https://github.com/josuepviana), com orientação do
+[Me. Fábio Ferraz Fernandez](http://lattes.cnpq.br/9386664812059696) e colaboração do
+[Dr. Sérgio Eduardo Soares Fernandes](http://lattes.cnpq.br/9797758799188189).
 
-Desenvolvido por: [José Inácio Rodrigues da Silva](https://github.com/josersinacio) e [Josué de Paulo Viana](https://github.com/josuepviana) 
+## Executar localmente
 
-Orientador: [Me. Fábio Ferraz Fernandez](http://lattes.cnpq.br/9386664812059696) 
+Docker Compose é a única forma suportada de iniciar o projeto localmente. O stack inclui
+Next.js/Nginx, Python, R, Pandoc, LaTeX, os pacotes R necessários e Redis.
 
-Com a colaboração de: [Dr. Sérgio Eduardo Soares Fernandes](http://lattes.cnpq.br/9797758799188189)
+    cp .env.example .env
+    # Preencha REDIS_PASSWORD e as configurações do AWS SES.
+    docker compose up --detach --build
 
+Serviços disponíveis:
 
-## Como rodar:
+- Interface: `http://localhost:3000`
+- API: `http://localhost:8000`
+- Saúde da API: `http://localhost:8000/health`
 
-**Instalar dependências primárias**
+Os serviços AWS usam exclusivamente a região `eu-west-1`. Para alterar as portas
+publicadas, defina `ENCELADUS_WEB_PORT` ou `ENCELADUS_PORT` no `.env`.
 
-Python v3 (`sudo apt install python python-is-python3`)
+Comandos operacionais:
 
-Pip v3 (`sudo apt install python3-pip`)
+    docker compose ps
+    docker compose logs --follow app
+    docker compose down
 
-Venv (`sudo apt install python3-venv`)
+`docker compose down` preserva os volumes de relatórios, Redis e população. Não use a
+opção `--volumes` se quiser manter esses dados.
 
-R (`sudo apt install r-base`)
+## População municipal do IBGE
 
-OpenSSL (`sudo apt install libcurl4-openssl-dev libssl-dev`)
+Antes de iniciar a API, o serviço `population-data` consulta a estimativa municipal mais
+recente na API SIDRA oficial do IBGE, usando a tabela 6579, variável 9324. O CSV validado
+é escrito de forma atômica no volume nomeado `population-data` e montado como somente
+leitura na API.
 
-Pandoc (`sudo apt install pandoc`)
+Se o IBGE estiver temporariamente indisponível, uma cópia válida já armazenada será
+reutilizada. A primeira inicialização exige acesso ao SIDRA. Para fixar um ano
+reprodutível, defina `IBGE_POPULATION_PERIOD`, por exemplo `2025`, no `.env`.
 
-Texline (`sudo apt install texlive`)
+Para atualizar os dados manualmente:
 
-Latex extras (`sudo apt install texlive-latex-extra`)
+    docker compose run --rm population-data
 
-Libfonts (`sudo apt-get install libfontconfig1-dev`)
+Essas estimativas anuais são usadas como denominador dos relatórios de densidade; não são
+os resultados do Censo 2022. Consulte a
+[tabela 6579 do SIDRA](https://sidra.ibge.gov.br/tabela/6579) e a
+[página oficial das estimativas](https://www.ibge.gov.br/estatisticas/sociais/populacao/9103-estimativas-de-populacao.html).
 
-**Fazer clone do projeto do Github:**
+## Interface e GitHub Pages
 
-    git clone git@github.com:josersinacio/EnceladusBigData.git
+A interface em `web/` usa Next.js, TypeScript, Tailwind CSS e o tema Catppuccin Latte. O
+Compose gera a exportação estática e a serve com Nginx; Python, Node.js e R não precisam
+ser instalados no host.
 
-**Criar e habilitar  um VirtualEnv para o Python:**
+O workflow `.github/workflows/pages.yml` publica a exportação estática quando há mudanças
+em `web/` na branch `main`. Antes da primeira publicação:
 
-	cd src
-    python -m venv venv 
-    source venv/bin/activate
+1. Configure a fonte do GitHub Pages como **GitHub Actions**.
+2. Crie a variável de repositório `NEXT_PUBLIC_API_URL` com a URL HTTPS pública da API.
+3. Configure `CORS_ORIGINS` na API com a origem do GitHub Pages, por exemplo
+   `https://usuario.github.io`.
 
-**Instalar o wheel:**
+O build detecta automaticamente o nome do repositório e configura o `basePath` dos assets.
 
-    pip install wheel
+## Produção
 
-**Instalar as dependências do requirements.txt**
+A API é publicada em uma única instância EC2 na região `eu-west-1`. O pipeline
+usa GitHub OIDC, ECR e Systems Manager, sem chaves AWS persistentes ou acesso SSH. API
+Gateway fornece o endereço HTTPS, uma função Lambda encaminha as chamadas pela VPC e o
+volume EBS criptografado preserva relatórios, Redis e o cache do IBGE.
 
-    pip install -r requirements.txt
+Consulte o [guia de implantação](deploy/README.md) para provisionar a infraestrutura,
+configurar DNS, preparar os ambientes do GitHub e executar o primeiro release.
 
-**Executar o setup.py que fará uma configuração básica para o python**
+## Desenvolvimento e validação
 
-    sudo python setup.py
+Após alterar a API, os scripts R ou a interface, reconstrua e valide o stack completo:
 
-***P.S.:** setup.py fará um download de CSV contendo uma estimativa populacional de 2020 no formato state,state_ibge_code,city_ibge_code,city,estimated_population.
-setup.py também instalará as biblioteca do R (incluindo o Microdatasus)*
+    docker compose up --detach --build
+    docker compose ps
+    docker compose logs --follow app
+
+O `.env` contém apenas opções externas ao stack: senha do Redis, SES, CORS e, se
+necessário, o período do IBGE e as portas publicadas. Não versione esse arquivo.

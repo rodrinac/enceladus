@@ -1,20 +1,25 @@
-import boto3
-from botocore.exceptions import ClientError
+import logging
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
-import logging
+from functools import lru_cache
+
+import boto3
+
+from settings import settings
 
 logger = logging.getLogger(__name__)
 
 
-def send_email(to: str, subject: str, file_name: str,  attachment: str):
-    SENDER = 'Enceladus Big Data <enceladus.bigdata@hotmail.com>'
-    RECIPIENT = to
-    CONFIGURATION_SET = 'Default'
-    SUBJECT = subject
+@lru_cache(maxsize=1)
+def _ses_client():
+    return boto3.client('ses', region_name=settings.ses_region)
 
-    AWS_REGION = 'us-east-2'
+
+def send_email(to: str, subject: str, file_name: str, attachment: bytes):
+    SENDER = settings.ses_sender
+    RECIPIENT = to
+    SUBJECT = subject
 
     BODY_TEXT = (f'{subject}\r\n'
                  'This email was sent with Amazon SES using the '
@@ -38,8 +43,6 @@ def send_email(to: str, subject: str, file_name: str,  attachment: str):
 
     ATTACHMENT = file_name
 
-    client = boto3.client('ses', region_name=AWS_REGION)
-
     msg = MIMEMultipart('mixed')
 
     msg['Subject'] = SUBJECT
@@ -62,26 +65,14 @@ def send_email(to: str, subject: str, file_name: str,  attachment: str):
 
     msg.attach(att)
 
-    try:
-        logger.info(
-            'Enviando relatório por e-mail com destinatário para %s.', to)
+    request = {
+        'Destinations': [RECIPIENT],
+        'RawMessage': {'Data': msg.as_string()},
+        'Source': SENDER,
+    }
+    if settings.ses_configuration_set:
+        request['ConfigurationSetName'] = settings.ses_configuration_set
 
-        response = client.send_raw_email(
-            Destinations=[
-                RECIPIENT
-            ],
-            RawMessage={
-                'Data': msg.as_string(),
-            },
-            Source=SENDER,
-            # If you are not using a configuration set, comment or delete the
-            # following line
-            ConfigurationSetName=CONFIGURATION_SET,
-        )
-    # Display an error if something goes wrong.
-    except ClientError as e:
-        logger.error('Erro ao enviar e-mail',
-                     e.response['Error']['Message'], exc_info=True)
-    else:
-        logger.info("E-mail enviado! ID da mensagem: %s",
-                    response['MessageId'])
+    logger.info('Enviando relatório por e-mail com destinatário para %s.', to)
+    response = _ses_client().send_raw_email(**request)
+    logger.info("E-mail enviado! ID da mensagem: %s", response['MessageId'])

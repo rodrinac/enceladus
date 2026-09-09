@@ -1,0 +1,506 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Enceladus single-host production stack — favors an auditable Docker Compose deployment over distributed infrastructure
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@2
+  com.aws.cloudformation.Context:
+    arch: GitHub OIDC -> ECR + SSM -> EC2; API Gateway -> VPC Lambda -> Quart; retained EBS -> state
+    must:
+      - Deploy only in eu-west-1
+      - No inbound SSH; operate through Systems Manager
+      - Keep runtime secrets in Secrets Manager
+    ref:
+      - at: deploy/README.md
+        has: bootstrap, DNS, deploy, rollback, and recovery procedures
+        scope: operations
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC containing the public subnet
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet with a route to an internet gateway
+  CorsOrigin:
+    Type: String
+    AllowedPattern: ^https://[A-Za-z0-9./_-]+$
+    Description: GitHub Pages origin allowed to call the API
+  SesSender:
+    Type: String
+    Default: jose.rs.inacio@gmail.com
+    MinLength: 3
+    Description: Verified SES sender address or display-name address
+  SesConfigurationSet:
+    Type: String
+    Default: ""
+  IbgePopulationPeriod:
+    Type: String
+    Default: last%201
+    AllowedPattern: ^(last%201|[0-9]{4})$
+  InstanceType:
+    Type: String
+    Default: m7i-flex.large
+    AllowedValues: [m7i-flex.large, c7i-flex.large, t3.small, t3.micro]
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  DataVolumeSize:
+    Type: Number
+    Default: 50
+    MinValue: 20
+    MaxValue: 16384
+  GitHubRepository:
+    Type: String
+    Default: rodrinac/enceladus
+    AllowedPattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+  GitHubOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: Existing token.actions.githubusercontent.com provider ARN; leave empty to create it
+
+Conditions:
+  CreateGitHubOidcProvider: !Equals [!Ref GitHubOidcProviderArn, ""]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateGitHubOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  ImageRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Immutable app images consumed by digest on the single production host
+        must:
+          - Retain images if the infrastructure stack is removed
+        mutable: change-with-constraints
+    Properties:
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Keep 20 release images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}'
+
+  RedisSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Host retrieves Redis auth at deploy time; GitHub never receives it
+        must:
+          - Never place the generated value in user data or GitHub secrets
+        mutable: must-never-change
+    Properties:
+      Description: Enceladus production Redis password
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: RuntimeAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadRedisSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref RedisSecret
+              - Sid: AuthenticateEcr
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: PullApplicationImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !GetAtt ImageRepository.Arn
+              - Sid: SendEmail
+                Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: API accepts traffic only from the VPC Lambda proxy; host has no public listeners
+        must:
+          - Never add public or SSH ingress
+        mutable: review-required
+    Properties:
+      GroupDescription: Enceladus API ingress from Lambda only
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 20
+              VolumeType: gp3
+        IamInstanceProfile:
+          Arn: !GetAtt InstanceProfile.Arn
+        ImageId: !Ref LatestAmiId
+        InstanceType: !Ref InstanceType
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpPutResponseHopLimit: 2
+          HttpTokens: required
+        SecurityGroupIds: [!Ref SecurityGroup]
+        UserData:
+          Fn::Base64:
+            !Sub |
+              #!/usr/bin/env bash
+              set -Eeuo pipefail
+              dnf install --assumeyes docker
+              systemctl enable --now docker amazon-ssm-agent
+              mkdir --parents /usr/libexec/docker/cli-plugins /opt/enceladus
+              curl --fail --location --retry 5 \
+                https://github.com/docker/compose/releases/download/v2.39.1/docker-compose-linux-x86_64 \
+                --output /usr/libexec/docker/cli-plugins/docker-compose
+              chmod 0755 /usr/libexec/docker/cli-plugins/docker-compose
+
+              device=""
+              for attempt in $(seq 1 60); do
+                root_partition=$(findmnt -n -o SOURCE /)
+                root_disk=$(lsblk -n -o PKNAME "$root_partition")
+                device=$(lsblk -dn -o NAME,TYPE | awk -v root="$root_disk" '$2 == "disk" && $1 != root {print "/dev/"$1; exit}')
+                [[ -n $device ]] && break
+                sleep 2
+              done
+              [[ -n $device ]]
+              blkid "$device" || mkfs.xfs "$device"
+              mkdir --parents /srv/enceladus
+              uuid=$(blkid -s UUID -o value "$device")
+              echo "UUID=$uuid /srv/enceladus xfs defaults,nofail 0 2" >> /etc/fstab
+              mount /srv/enceladus
+              mkdir --parents /srv/enceladus/{population,redis,reports}
+              chmod 0777 /srv/enceladus/population /srv/enceladus/redis /srv/enceladus/reports
+
+              cat > /opt/enceladus/runtime.env <<'EOF'
+              CORS_ORIGINS=${CorsOrigin}
+              IBGE_POPULATION_PERIOD=${IbgePopulationPeriod}
+              REDIS_SECRET_ARN=${RedisSecret}
+              SES_CONFIGURATION_SET=${SesConfigurationSet}
+              SES_SENDER=${SesSender}
+              SOURCE_REF=main
+              SOURCE_REPOSITORY=${GitHubRepository}
+              EOF
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Single host minimizes ops cost; SSM replaces SSH and Compose preserves app topology
+        must:
+          - Require IMDSv2 with hop limit 2 for containers
+          - Run in a public subnet so Caddy and outbound AWS APIs are reachable
+        mutable: review-required
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: "1"
+      SubnetId: !Ref PublicSubnetId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-host
+        - Key: Application
+          Value: enceladus
+
+  DataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Persists reports, Redis AOF, Caddy state, and IBGE cache independently from the host
+        must:
+          - Retain through stack deletion and instance replacement
+          - Attach only within the instance Availability Zone
+        mutable: must-never-change
+    Properties:
+      AvailabilityZone: !GetAtt Instance.AvailabilityZone
+      Encrypted: true
+      Size: !Ref DataVolumeSize
+      VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-data
+
+  DataVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/sdf
+      InstanceId: !Ref Instance
+      VolumeId: !Ref DataVolume
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  ElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      InstanceId: !Ref Instance
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Egress from API Gateway Lambda proxy to the EC2 API
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          DestinationSecurityGroupId: !Ref SecurityGroup
+
+  ApiIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Quart traffic from the API proxy
+      FromPort: 8000
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      ToPort: 8000
+
+  ApiProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  ApiProxyFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Gives the API a managed TLS endpoint without a custom domain or public EC2 ingress
+        must:
+          - Preserve query strings and base64 binary report responses
+          - Keep timeout below the API Gateway integration limit
+        mutable: change-with-constraints
+    Properties:
+      Architectures: [arm64]
+      Environment:
+        Variables:
+          UPSTREAM_HOST: !GetAtt Instance.PrivateIp
+      Handler: index.handler
+      MemorySize: 256
+      Role: !GetAtt ApiProxyRole.Arn
+      Runtime: python3.12
+      Timeout: 29
+      VpcConfig:
+        SecurityGroupIds: [!Ref LambdaSecurityGroup]
+        SubnetIds: [!Ref PublicSubnetId]
+      Code:
+        ZipFile: |
+          import base64
+          import os
+          import urllib.error
+          import urllib.request
+
+          HOP_BY_HOP = {
+              "connection", "content-length", "keep-alive", "proxy-authenticate",
+              "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade",
+          }
+
+          def handler(event, context):
+              request_context = event.get("requestContext", {}).get("http", {})
+              method = request_context.get("method", "GET")
+              path = event.get("rawPath", "/")
+              query = event.get("rawQueryString", "")
+              url = f"http://{os.environ['UPSTREAM_HOST']}:8000{path}"
+              if query:
+                  url = f"{url}?{query}"
+
+              body = event.get("body")
+              if body and event.get("isBase64Encoded"):
+                  body = base64.b64decode(body)
+              elif body:
+                  body = body.encode()
+
+              headers = {
+                  key: value for key, value in event.get("headers", {}).items()
+                  if key.lower() not in HOP_BY_HOP and key.lower() != "host"
+              }
+              request = urllib.request.Request(url, data=body, headers=headers, method=method)
+
+              try:
+                  response = urllib.request.urlopen(request, timeout=28)
+              except urllib.error.HTTPError as error:
+                  response = error
+
+              response_body = response.read()
+              response_headers = {
+                  key: value for key, value in response.headers.items()
+                  if key.lower() not in HOP_BY_HOP
+              }
+              return {
+                  "statusCode": response.status,
+                  "headers": response_headers,
+                  "body": base64.b64encode(response_body).decode(),
+                  "isBase64Encoded": True,
+              }
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      CorsConfiguration:
+        AllowHeaders: [content-type]
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowOrigins: [!Ref CorsOrigin]
+      Description: Managed HTTPS entry point for Enceladus
+      Name: !Sub ${AWS::StackName}-api
+      ProtocolType: HTTP
+
+  HttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt ApiProxyFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  HttpApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      AuthorizationType: NONE
+      RouteKey: $default
+      Target: !Sub integrations/${HttpApiIntegration}
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      AutoDeploy: true
+      StageName: $default
+
+  HttpApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ApiProxyFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Short-lived GitHub OIDC sessions push images and invoke one tagged host through SSM
+        must:
+          - Trust only the repository production environment subject
+          - Never grant infrastructure mutation or secret read access
+        mutable: review-required
+    Properties:
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateGitHubOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:production
+      Policies:
+        - PolicyName: BuildAndDeploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AuthenticateEcr
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: PushApplicationImage
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !GetAtt ImageRepository.Arn
+              - Sid: DeployToHost
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Instance}
+              - Sid: ReadDeploymentResult
+                Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                Resource: "*"
+
+Outputs:
+  ApiUrl:
+    Description: Set this as the NEXT_PUBLIC_API_URL GitHub repository variable
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  ElasticIp:
+    Description: Stable outbound address for the production host
+    Value: !Ref ElasticIp
+  InstanceId:
+    Description: Set this as the EC2_INSTANCE_ID GitHub production variable
+    Value: !Ref Instance
+  EcrRepositoryUri:
+    Description: Set this as the ECR_REPOSITORY_URI GitHub production variable
+    Value: !GetAtt ImageRepository.RepositoryUri
+  GitHubDeployRoleArn:
+    Description: Set this as the AWS_DEPLOY_ROLE_ARN GitHub production variable
+    Value: !GetAtt GitHubDeployRole.Arn

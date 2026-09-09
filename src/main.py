@@ -1,21 +1,32 @@
-from quart import Quart, request, jsonify, Response
-from quart_cors import cors
-from default_config import defaultConfig
-from relatorios import relatorios, densidade_municipal_por_periodo_geral, densidade_municipal_por_periodo, casos_mensais_por_municipio_por_estado
-from pathlib import Path
-import logging.config
-import os.path
 import asyncio
+import logging.config
 import uuid
-import os
 
-app = Quart(__name__, static_url_path='', static_folder='public')
+from quart import Quart, Response, jsonify, request
+from quart_cors import cors
 
-app = cors(app, allow_origin="*")
+from default_config import defaultConfig
+from relatorios import (
+    casos_mensais_por_municipio_por_estado,
+    densidade_municipal_por_periodo,
+    densidade_municipal_por_periodo_geral,
+    relatorios,
+)
+from settings import settings
+
+app = Quart(__name__)
+
+app = cors(app, allow_origin=settings.cors_origins)
 
 @app.route('/')
-async def root():
-    return await app.send_static_file('index.html')
+def root():
+    return jsonify(service='enceladus-api', status='healthy')
+
+
+@app.route('/health')
+def health():
+    return jsonify(status='healthy')
+
 
 @app.route('/config/anos')
 def anos_disponiveis():
@@ -130,9 +141,6 @@ async def post_relatorio_queimaduras_2():
 
     return dict(destino=email_param, id_requisicao=id_req), 202
 
-app_home = os.path.join(Path.home(), '.enceladus', 'logs')
-os.makedirs(app_home, exist_ok=True)
-
 logging_config = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -142,13 +150,6 @@ logging_config = {
         },
     },
     'handlers': {
-        'file_handler': {
-            'class': 'logging.FileHandler',
-            'level': 'DEBUG',
-            'formatter': 'standard',
-            'filename': os.path.join(app_home, 'application.log'),
-            'encoding': 'utf8'
-        },
         'console_handler': {
             'class': 'logging.StreamHandler',
             'level': 'INFO',
@@ -157,13 +158,11 @@ logging_config = {
     },
     'loggers': {
         '': {
-            'handlers': ['file_handler', 'console_handler'],
+            'handlers': ['console_handler'],
             'level': 'DEBUG',
             'propagate': False
         }
     }
 }
-logging.config.dictConfig(logging_config)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+logging.config.dictConfig(logging_config)

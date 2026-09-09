@@ -1,9 +1,15 @@
+from pathlib import Path
+
 import yaml
+
+from settings import settings
+
 
 class DefaultConfig:
 
-    def __init__(self):
-        self.__config = self.__read_yaml()  
+    def __init__(self, config_path: Path | None = None):
+        self.__config_path = config_path or settings.config_path
+        self.__config = self.__read_yaml()
 
     def anos_disponiveis(self) -> list:
         return self.__config.get("anos")
@@ -11,19 +17,15 @@ class DefaultConfig:
     def estados_disponiveis(self) -> list:
         return self.__config.get("estados")
 
-    def codigos_cid10(self):
+    def codigos_cid10(self) -> dict:
         return self.__config.get("codigosCid10")
-    
+
     def relatorios(self) -> list:
-      return self.__config.get("relatorios")
+        return self.__config.get("relatorios")
 
     def __read_yaml(self):
-        with open('./config.yml', 'r', encoding="utf-8") as stream:
-            try:
-                return yaml.safe_load(stream)
-            except yaml.YAMLError as exc:
-                print(exc)
-                return dict()
+        with self.__config_path.open(encoding="utf-8") as stream:
+            return yaml.safe_load(stream) or {}
 
 
 defaultConfig = DefaultConfig()
