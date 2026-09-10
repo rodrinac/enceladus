@@ -1,6 +1,15 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 import {
   apiUrl,
@@ -137,14 +146,14 @@ export default function Home() {
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-latte-blue">Enceladus</p>
             <h1 className="text-xl font-extrabold sm:text-2xl">Inteligência sobre queimaduras</h1>
           </div>
-          <span className="hidden rounded-full bg-latte-green/15 px-3 py-1 text-sm font-bold text-latte-green sm:inline">
+          <Badge className="hidden rounded-full bg-latte-green/15 px-3 py-1 text-sm font-bold text-latte-green sm:inline">
             Dados para pesquisa
-          </span>
+          </Badge>
         </div>
       </header>
 
       <div className="mx-auto grid max-w-7xl gap-8 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] lg:py-12">
-        <section className="rounded-3xl border border-latte-surface0 bg-white p-6 shadow-sm sm:p-8">
+        <Card className="gap-0 self-start rounded-3xl p-6 sm:p-8">
           <div className="mb-7">
             <p className="mb-2 text-sm font-bold text-latte-mauve">NOVO PEDIDO</p>
             <h2 className="text-2xl font-extrabold">Solicitar relatório</h2>
@@ -157,9 +166,10 @@ export default function Home() {
             <StatusMessage>Carregando opções…</StatusMessage>
           ) : (
             <form className="space-y-6" onSubmit={submit}>
-              <Field label="Tipo de relatório">
-                <select
-                  className="control"
+              <Field label="Tipo de relatório" id="report-type">
+                <NativeSelect
+                  id="report-type"
+                  className="h-11"
                   onChange={(event) => {
                     setSelectedReportId(event.target.value);
                     setSelectedStates([]);
@@ -167,17 +177,19 @@ export default function Home() {
                   value={selectedReportId}
                 >
                   {configuration.reportTypes.map((reportType) => (
-                    <option key={reportType.id} value={reportType.id}>{reportType.nome}</option>
+                    <NativeSelectOption key={reportType.id} value={reportType.id}>{reportType.nome}</NativeSelectOption>
                   ))}
-                </select>
+                </NativeSelect>
               </Field>
 
               <fieldset>
+                <legend className="mb-3 font-bold">Estados</legend>
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <legend className="font-bold">Estados</legend>
                   {selectedReport?.multiplos_estados && (
-                    <button
-                      className="text-sm font-bold text-latte-blue hover:text-latte-sapphire"
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto text-primary"
                       onClick={() => setSelectedStates(
                         selectedStates.length === configuration.states.length
                           ? []
@@ -186,55 +198,57 @@ export default function Home() {
                       type="button"
                     >
                       {selectedStates.length === configuration.states.length ? "Limpar" : "Selecionar todos"}
-                    </button>
+                    </Button>
                   )}
                 </div>
-                <div className="grid max-h-56 grid-cols-2 gap-2 overflow-y-auto rounded-2xl border border-latte-surface1 bg-latte-base p-3 sm:grid-cols-3">
+                <StateSelection
+                  multiple={selectedReport?.multiplos_estados ?? false}
+                  value={selectedStates[0] ?? ""}
+                  onValueChange={(state) => setSelectedStates([state])}
+                >
                   {configuration.states.map((state) => {
                     const checked = selectedStates.includes(state.sigla);
                     return (
-                      <label
+                      <Label
+                        htmlFor={`state-${state.sigla}`}
                         className={`flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm transition ${
-                          checked ? "bg-latte-blue text-white" : "hover:bg-latte-surface0"
+                          checked ? "bg-latte-blue/10 text-primary" : "hover:bg-latte-surface0"
                         }`}
                         key={state.sigla}
                       >
-                        <input
-                          checked={checked}
-                          className="accent-latte-blue"
-                          name="estado"
-                          onChange={() => toggleState(state.sigla)}
-                          type={selectedReport?.multiplos_estados ? "checkbox" : "radio"}
-                          value={state.sigla}
-                        />
+                        {selectedReport?.multiplos_estados ? (
+                          <Checkbox id={`state-${state.sigla}`} checked={checked} name="estado" onCheckedChange={() => toggleState(state.sigla)} value={state.sigla} />
+                        ) : (
+                          <RadioGroupItem id={`state-${state.sigla}`} value={state.sigla} />
+                        )}
                         <span>{state.nome}</span>
-                      </label>
+                      </Label>
                     );
                   })}
-                </div>
+                </StateSelection>
               </fieldset>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Data inicial">
-                  <input className="control" max={maxDate} min={minDate} onChange={(event) => setStartDate(event.target.value)} required type="date" value={startDate} />
+                <Field label="Data inicial" id="start-date">
+                  <Input id="start-date" className="h-11" max={maxDate} min={minDate} onChange={(event) => setStartDate(event.target.value)} required type="date" value={startDate} />
                 </Field>
-                <Field label="Data final">
-                  <input className="control" max={maxDate} min={startDate || minDate} onChange={(event) => setEndDate(event.target.value)} required type="date" value={endDate} />
+                <Field label="Data final" id="end-date">
+                  <Input id="end-date" className="h-11" max={maxDate} min={startDate || minDate} onChange={(event) => setEndDate(event.target.value)} required type="date" value={endDate} />
                 </Field>
               </div>
 
-              <Field label="E-mail">
-                <input autoComplete="email" className="control" onChange={(event) => setEmail(event.target.value)} placeholder="pesquisador@exemplo.org" required type="email" value={email} />
+              <Field label="E-mail" id="email">
+                <Input id="email" autoComplete="email" className="h-11" onChange={(event) => setEmail(event.target.value)} placeholder="pesquisador@exemplo.org" required type="email" value={email} />
               </Field>
 
               {notice && <StatusMessage kind={notice.kind}>{notice.message}</StatusMessage>}
 
-              <button className="w-full rounded-xl bg-latte-blue px-5 py-3 font-extrabold text-white transition hover:bg-latte-sapphire disabled:cursor-wait disabled:opacity-60" disabled={isSubmitting} type="submit">
+              <Button className="h-12 w-full rounded-xl font-extrabold" disabled={isSubmitting} type="submit">
                 {isSubmitting ? "Enviando…" : "Processar relatório"}
-              </button>
+              </Button>
             </form>
           )}
-        </section>
+        </Card>
 
         <section aria-labelledby="processed-reports-title">
           <div className="mb-5 flex items-end justify-between gap-4">
@@ -242,9 +256,9 @@ export default function Home() {
               <p className="mb-2 text-sm font-bold text-latte-teal">ARQUIVO</p>
               <h2 className="text-2xl font-extrabold" id="processed-reports-title">Relatórios processados</h2>
             </div>
-            <button className="rounded-xl border border-latte-surface1 bg-white px-4 py-2 text-sm font-bold hover:bg-latte-mantle" onClick={() => void refreshReports()} type="button">
+            <Button variant="outline" className="bg-card" onClick={() => void refreshReports()} type="button">
               Atualizar
-            </button>
+            </Button>
           </div>
 
           {reportsError && <StatusMessage kind="error">{reportsError}</StatusMessage>}
@@ -257,7 +271,7 @@ export default function Home() {
           ) : (
             <div className="space-y-3">
               {reports.map((report) => (
-                <article className="rounded-2xl border border-latte-surface0 bg-white p-5 shadow-sm" key={`${report.uri}-${report.data_processamento}`}>
+                <Card className="rounded-2xl p-5" key={`${report.uri}-${report.data_processamento}`}>
                   <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                     <div>
                       <h3 className="font-extrabold">{report.tipo}</h3>
@@ -268,11 +282,13 @@ export default function Home() {
                         Processado em {report.data_processamento ?? "data indisponível"}
                       </p>
                     </div>
-                    <a className="shrink-0 rounded-xl bg-latte-teal/15 px-4 py-2 text-center text-sm font-extrabold text-latte-teal hover:bg-latte-teal/25" href={apiUrl(report.uri)} rel="noreferrer" target="_blank">
-                      Baixar PDF
-                    </a>
+                    <Button asChild variant="secondary" className="bg-latte-teal/15 text-latte-teal hover:bg-latte-teal/25">
+                      <a href={apiUrl(report.uri)} rel="noreferrer" target="_blank">
+                        Baixar PDF
+                      </a>
+                    </Button>
                   </div>
-                </article>
+                </Card>
               ))}
             </div>
           )}
@@ -286,12 +302,29 @@ export default function Home() {
   );
 }
 
-function Field({ children, label }: Readonly<{ children: React.ReactNode; label: string }>) {
+function Field({ children, label, id }: Readonly<{ children: React.ReactNode; label: string; id: string }>) {
   return (
-    <label className="block">
-      <span className="mb-2 block font-bold">{label}</span>
+    <div className="space-y-2">
+      <Label htmlFor={id} className="font-bold">{label}</Label>
       {children}
-    </label>
+    </div>
+  );
+}
+
+function StateSelection({ children, multiple, value, onValueChange }: Readonly<{
+  children: React.ReactNode;
+  multiple: boolean;
+  value: string;
+  onValueChange: (state: string) => void;
+}>) {
+  const className = "grid max-h-56 grid-cols-2 gap-2 overflow-y-auto rounded-2xl border border-input bg-background p-3 sm:grid-cols-3";
+
+  return multiple ? (
+    <div className={className}>{children}</div>
+  ) : (
+    <RadioGroup aria-label="Estados" className={className} value={value} onValueChange={onValueChange}>
+      {children}
+    </RadioGroup>
   );
 }
 
@@ -308,5 +341,9 @@ function StatusMessage({
     success: "border-latte-green/30 bg-latte-green/10 text-latte-green",
   };
 
-  return <p className={`rounded-xl border p-4 text-sm font-bold ${styles[kind]}`}>{children}</p>;
+  return (
+    <Alert role={kind === "error" ? "alert" : "status"} className={`rounded-xl ${styles[kind]}`}>
+      <AlertDescription className="font-bold text-inherit">{children}</AlertDescription>
+    </Alert>
+  );
 }

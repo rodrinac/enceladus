@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -11,8 +12,10 @@ class DefaultConfig:
         self.__config_path = config_path or settings.config_path
         self.__config = self.__read_yaml()
 
-    def anos_disponiveis(self) -> list:
-        return self.__config.get("anos")
+    def anos_disponiveis(self) -> list[int]:
+        if "anoInicio" in self.__config:
+            return list(range(self.__config["anoInicio"], date.today().year + 1))
+        return self.__config.get("anos", [])
 
     def estados_disponiveis(self) -> list:
         return self.__config.get("estados")

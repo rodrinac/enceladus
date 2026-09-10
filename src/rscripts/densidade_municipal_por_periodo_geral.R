@@ -21,8 +21,8 @@ diretorio_de_trabalho <- args[[5]]
 data_inicio <- floor_date(data_inicio, "month")
 data_fim <- ceiling_date(data_fim, "month") - days(1)
 
-ano_inicio <- strftime(data_inicio, "%Y")
-ano_fim <- strftime(data_fim, "%Y")
+ano_inicio <- as.integer(strftime(data_inicio, "%Y"))
+ano_fim <- as.integer(strftime(data_fim, "%Y"))
 
 source("rscripts/codigos_cid10.R")
 

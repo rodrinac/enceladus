@@ -1,4 +1,6 @@
+from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -31,6 +33,16 @@ def test_loads_an_explicit_config_file(tmp_path: Path) -> None:
     assert config.estados_disponiveis() == []
     assert config.codigos_cid10() == {}
     assert config.relatorios() == []
+
+
+def test_available_years_advance_without_reloading_config() -> None:
+    config = DefaultConfig()
+
+    with patch("default_config.date") as clock:
+        clock.today.return_value = date(2026, 12, 31)
+        assert config.anos_disponiveis() == list(range(2014, 2027))
+        clock.today.return_value = date(2027, 1, 1)
+        assert config.anos_disponiveis() == list(range(2014, 2028))
 
 
 def test_invalid_yaml_is_not_silently_ignored(tmp_path: Path) -> None:
