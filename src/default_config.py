@@ -1,4 +1,3 @@
-from datetime import date
 from pathlib import Path
 
 import yaml
@@ -14,7 +13,14 @@ class DefaultConfig:
 
     def anos_disponiveis(self) -> list[int]:
         if "anoInicio" in self.__config:
-            return list(range(self.__config["anoInicio"], date.today().year + 1))
+            end_year = self.__config["anoFim"]
+            try:
+                discovered_year = int(settings.datasus_max_year_path.read_text().strip())
+                if discovered_year >= self.__config["anoInicio"]:
+                    end_year = discovered_year
+            except (OSError, ValueError):
+                pass
+            return list(range(self.__config["anoInicio"], end_year + 1))
         return self.__config.get("anos", [])
 
     def estados_disponiveis(self) -> list:

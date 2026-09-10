@@ -58,6 +58,16 @@ os resultados do Censo 2022. Consulte a
 [tabela 6579 do SIDRA](https://sidra.ibge.gov.br/tabela/6579) e a
 [página oficial das estimativas](https://www.ibge.gov.br/estatisticas/sociais/populacao/9103-estimativas-de-populacao.html).
 
+Na mesma inicialização, o serviço consulta os arquivos finais de mortalidade disponíveis
+no DataSUS e grava o último ano publicado. A interface usa esse valor como limite; se o
+FTP estiver indisponível, mantém o último valor válido ou usa 2024 na primeira execução.
+
+Os dados baixados pelo `microdatasus` são persistidos por sistema, intervalo de anos e
+estados. Pedidos repetidos reutilizam o cache sem consultar o FTP. Escritas são atômicas,
+pedidos concorrentes compartilham o mesmo download e os arquivos mais antigos são removidos
+quando o cache ultrapassa 5 GiB. Defina `ENCELADUS_DATASUS_CACHE_MAX_BYTES` para alterar
+esse limite.
+
 ## Interface e GitHub Pages
 
 A interface em `web/` usa Next.js, TypeScript, Tailwind CSS e o tema Catppuccin Latte. O

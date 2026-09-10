@@ -1,10 +1,10 @@
-from datetime import date
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
 
+import default_config as default_config_module
 from default_config import DefaultConfig
 
 
@@ -35,14 +35,18 @@ def test_loads_an_explicit_config_file(tmp_path: Path) -> None:
     assert config.relatorios() == []
 
 
-def test_available_years_advance_without_reloading_config() -> None:
+def test_available_years_use_discovered_datasus_cap(tmp_path: Path, monkeypatch) -> None:
     config = DefaultConfig()
+    cap_path = tmp_path / "datasus-max-year.txt"
+    monkeypatch.setattr(
+        default_config_module,
+        "settings",
+        replace(default_config_module.settings, datasus_max_year_path=cap_path),
+    )
 
-    with patch("default_config.date") as clock:
-        clock.today.return_value = date(2026, 12, 31)
-        assert config.anos_disponiveis() == list(range(2014, 2027))
-        clock.today.return_value = date(2027, 1, 1)
-        assert config.anos_disponiveis() == list(range(2014, 2028))
+    assert config.anos_disponiveis() == list(range(2014, 2025))
+    cap_path.write_text("2025\n", encoding="utf-8")
+    assert config.anos_disponiveis() == list(range(2014, 2026))
 
 
 def test_invalid_yaml_is_not_silently_ignored(tmp_path: Path) -> None:

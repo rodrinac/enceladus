@@ -1,6 +1,8 @@
 import csv
+import ftplib
 import json
 import os
+import re
 import tempfile
 import time
 import urllib.error
@@ -12,8 +14,55 @@ SIDRA_URL = (
     "p/{period}?formato=json"
 )
 OUTPUT_PATH = Path("/data/population.csv")
+DATASUS_MAX_YEAR_PATH = Path("/data/datasus-max-year.txt")
+DATASUS_HOST = "ftp.datasus.gov.br"
+DATASUS_DIRECTORY = "/dissemin/publicos/SIM/CID10/DORES"
 EXPECTED_FIELDS = {"D1C", "D1N", "V", "D3C"}
 MINIMUM_MUNICIPALITIES = 5_500
+
+
+def discover_datasus_max_year(timeout: int = 20) -> int:
+    with ftplib.FTP(DATASUS_HOST, timeout=timeout) as ftp:
+        ftp.login()
+        ftp.cwd(DATASUS_DIRECTORY)
+        file_names = ftp.nlst()
+
+    years = [
+        int(match.group(1))
+        for file_name in file_names
+        if (match := re.fullmatch(r"DO[A-Z]{2}(\d{4})\.DBC", Path(file_name).name, re.IGNORECASE))
+    ]
+    if not years:
+        raise ValueError("DataSUS returned no final SIM-DO files")
+    return max(years)
+
+
+def write_text_atomically(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.stem}-")
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(value)
+        temporary_path.chmod(0o644)
+        temporary_path.replace(path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def refresh_datasus_max_year() -> None:
+    fallback = int(os.getenv("DATASUS_MAX_YEAR_FALLBACK", "2024"))
+    try:
+        max_year = discover_datasus_max_year()
+        write_text_atomically(DATASUS_MAX_YEAR_PATH, f"{max_year}\n")
+        print(f"Discovered DataSUS SIM-DO data through {max_year}")
+    except (OSError, ValueError, ftplib.Error) as error:
+        if DATASUS_MAX_YEAR_PATH.exists():
+            print(f"DataSUS discovery unavailable; retaining cached maximum year: {error}")
+        else:
+            write_text_atomically(DATASUS_MAX_YEAR_PATH, f"{fallback}\n")
+            print(f"DataSUS discovery unavailable; using fallback year {fallback}: {error}")
 
 
 def fetch_records(period: str) -> list[dict[str, str]]:
@@ -137,6 +186,7 @@ def main() -> None:
                 f"Saved {len(rows)} IBGE municipality estimates for "
                 f"{rows[0]['reference_year']} to {OUTPUT_PATH}"
             )
+            refresh_datasus_max_year()
             return
         except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
             last_error = error
@@ -145,6 +195,7 @@ def main() -> None:
 
     if has_valid_cache():
         print(f"IBGE is unavailable; retaining cached population data: {last_error}")
+        refresh_datasus_max_year()
         return
 
     raise RuntimeError("Unable to fetch IBGE population data and no cache exists") from last_error

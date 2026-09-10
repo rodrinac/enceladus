@@ -24,6 +24,7 @@ for (script in scripts) {
       )
       stop(structure(list(message = "validated"), class = c("validated_years", "error", "condition")))
     }
+    environment$fetch_datasus_cached <- environment$fetch_datasus
     validated <- tryCatch({
       eval(parse(file = file.path("rscripts", paste0(script, ".R"))), environment)
       FALSE

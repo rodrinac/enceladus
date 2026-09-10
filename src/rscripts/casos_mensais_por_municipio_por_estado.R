@@ -15,13 +15,14 @@ nome_arquivo <- args[[4]]
 diretorio_de_trabalho <- args[[5]]
 
 source("rscripts/codigos_cid10.R")
+source("rscripts/fetch_datasus_cached.R")
 
 regex <- stri_paste(codigos_cid10, collapse = "|")
 
 datalist <- list()
 
 for (i in seq_len(length(estados))) {
-  dados <- fetch_datasus(
+  dados <- fetch_datasus_cached(
     year_start = ano_inicio,
     year_end = ano_fim,
     uf = estados[[i]],

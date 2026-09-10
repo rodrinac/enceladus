@@ -25,13 +25,14 @@ ano_inicio <- as.integer(strftime(data_inicio, "%Y"))
 ano_fim <- as.integer(strftime(data_fim, "%Y"))
 
 source("rscripts/codigos_cid10.R")
+source("rscripts/fetch_datasus_cached.R")
 
 dados_estados <- vector(mode = "list", length = length(estados))
 
 regex <- stri_paste(codigos_cid10, collapse = "|")
 
 for (i in seq_len(length(estados))) {
-  dados <- fetch_datasus(
+  dados <- fetch_datasus_cached(
     year_start = ano_inicio,
     year_end = ano_fim,
     uf = estados[i],

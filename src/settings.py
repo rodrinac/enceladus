@@ -24,6 +24,7 @@ class Settings:
     config_path: Path
     cors_origins: str | list[str]
     data_dir: Path
+    datasus_max_year_path: Path
     population_data_path: Path
     redis_db: int
     redis_host: str
@@ -44,6 +45,10 @@ class Settings:
             config_path=SOURCE_ROOT / "config.yml",
             cors_origins=_get_origins(),
             data_dir=SOURCE_ROOT / "data",
+            datasus_max_year_path=_get_path(
+                "ENCELADUS_DATASUS_MAX_YEAR_PATH",
+                APP_HOME / "data" / "datasus-max-year.txt",
+            ),
             population_data_path=_get_path(
                 "ENCELADUS_POPULATION_DATA_PATH",
                 APP_HOME / "data" / "population.csv",
