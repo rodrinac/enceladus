@@ -1,5 +1,4 @@
 import csv
-import ftplib
 import json
 import os
 import re
@@ -15,26 +14,35 @@ SIDRA_URL = (
 )
 OUTPUT_PATH = Path("/data/population.csv")
 DATASUS_MAX_YEAR_PATH = Path("/data/datasus-max-year.txt")
-DATASUS_HOST = "ftp.datasus.gov.br"
-DATASUS_DIRECTORY = "/dissemin/publicos/SIM/CID10/DORES"
+OPEN_DATASUS_CATALOG_URL = "https://dadosabertos.saude.gov.br/dataset/sim"
 EXPECTED_FIELDS = {"D1C", "D1N", "V", "D3C"}
 MINIMUM_MUNICIPALITIES = 5_500
 
 
 def discover_datasus_max_year(timeout: int = 20) -> int:
-    with ftplib.FTP(DATASUS_HOST, timeout=timeout) as ftp:
-        ftp.login()
-        ftp.cwd(DATASUS_DIRECTORY)
-        file_names = ftp.nlst()
-
+    request = urllib.request.Request(
+        OPEN_DATASUS_CATALOG_URL,
+        headers={"User-Agent": "enceladus-population-fetcher/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        catalog = response.read().decode("utf-8")
+    next_data = re.search(
+        r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+        catalog,
+        re.DOTALL,
+    )
+    if not next_data:
+        raise ValueError("OpenDataSUS catalog metadata is missing")
+    resources = json.loads(next_data.group(1))["props"]["pageProps"]["resources"]
     years = [
         int(match.group(1))
-        for file_name in file_names
-        if (match := re.fullmatch(r"DO[A-Z]{2}(\d{4})\.DBC", Path(file_name).name, re.IGNORECASE))
+        for resource in resources
+        if resource.get("format") == "CSV"
+        if (match := re.search(r"Mortalidade Geral (\d{4})", resource.get("name", "")))
     ]
     if not years:
-        raise ValueError("DataSUS returned no final SIM-DO files")
-    return max(years)
+        raise ValueError("OpenDataSUS catalog returned no final SIM CSV archives")
+    return min(max(years), 2024)
 
 
 def write_text_atomically(path: Path, value: str) -> None:
@@ -56,13 +64,13 @@ def refresh_datasus_max_year() -> None:
     try:
         max_year = discover_datasus_max_year()
         write_text_atomically(DATASUS_MAX_YEAR_PATH, f"{max_year}\n")
-        print(f"Discovered DataSUS SIM-DO data through {max_year}")
-    except (OSError, ValueError, ftplib.Error) as error:
+        print(f"Discovered OpenDataSUS SIM data through {max_year}")
+    except (OSError, ValueError) as error:
         if DATASUS_MAX_YEAR_PATH.exists():
-            print(f"DataSUS discovery unavailable; retaining cached maximum year: {error}")
+            print(f"OpenDataSUS discovery unavailable; retaining cached maximum year: {error}")
         else:
             write_text_atomically(DATASUS_MAX_YEAR_PATH, f"{fallback}\n")
-            print(f"DataSUS discovery unavailable; using fallback year {fallback}: {error}")
+            print(f"OpenDataSUS discovery unavailable; using fallback year {fallback}: {error}")
 
 
 def fetch_records(period: str) -> list[dict[str, str]]:
