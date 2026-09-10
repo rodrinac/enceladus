@@ -47,27 +47,26 @@ def test_invalid_cache_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
 
 def test_discovers_latest_final_datasus_year(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeFtp:
-        def __init__(self, host, timeout):
-            assert host == fetch_population.DATASUS_HOST
-            assert timeout == 20
-
+    class FakeResponse:
         def __enter__(self):
             return self
 
         def __exit__(self, *args):
             return None
 
-        def login(self):
-            pass
+        def read(self):
+            return b'''<script id="__NEXT_DATA__" type="application/json">{
+                "props":{"pageProps":{"resources":[
+                    {"format":"CSV","name":"Mortalidade Geral 2023"},
+                    {"format":"CSV","name":"Mortalidade Geral 2024"}
+                ]}}
+            }</script>'''
 
-        def cwd(self, directory):
-            assert directory == fetch_population.DATASUS_DIRECTORY
-
-        def nlst(self):
-            return ["DOAC2023.dbc", "DODF2024.DBC", "unrelated.txt"]
-
-    monkeypatch.setattr(fetch_population.ftplib, "FTP", FakeFtp)
+    monkeypatch.setattr(
+        fetch_population.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(),
+    )
 
     assert fetch_population.discover_datasus_max_year() == 2024
 

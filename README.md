@@ -59,14 +59,14 @@ os resultados do Censo 2022. Consulte a
 [página oficial das estimativas](https://www.ibge.gov.br/estatisticas/sociais/populacao/9103-estimativas-de-populacao.html).
 
 Na mesma inicialização, o serviço consulta os arquivos finais de mortalidade disponíveis
-no DataSUS e grava o último ano publicado. A interface usa esse valor como limite; se o
-FTP estiver indisponível, mantém o último valor válido ou usa 2024 na primeira execução.
+e grava o último ano publicado. A interface usa esse valor como limite; se a descoberta
+estiver indisponível, mantém o último valor válido ou usa 2024 na primeira execução.
 
-Os dados baixados pelo `microdatasus` são persistidos por sistema, intervalo de anos e
-estados. Pedidos repetidos reutilizam o cache sem consultar o FTP. Escritas são atômicas,
-pedidos concorrentes compartilham o mesmo download e os arquivos mais antigos são removidos
-quando o cache ultrapassa 5 GiB. Defina `ENCELADUS_DATASUS_CACHE_MAX_BYTES` para alterar
-esse limite.
+Os dados SIM são baixados dos arquivos anuais oficiais do OpenDataSUS sobre HTTPS e
+filtrados por estado durante a leitura. Os arquivos nacionais e resultados filtrados ficam
+no volume persistente; pedidos repetidos reutilizam o cache. Escritas são atômicas, pedidos
+concorrentes compartilham o mesmo download e os resultados mais antigos são removidos quando
+o cache ultrapassa 5 GiB. Defina `ENCELADUS_DATASUS_CACHE_MAX_BYTES` para alterar esse limite.
 
 ## Interface e GitHub Pages
 
@@ -104,3 +104,17 @@ Após alterar a API, os scripts R ou a interface, reconstrua e valide o stack co
 
 O `.env` contém apenas opções externas ao stack: senha do Redis, SES, CORS e, se
 necessário, o período do IBGE e as portas publicadas. Não versione esse arquivo.
+
+Para verificar cada dependência externa sem gerar relatórios ou enviar e-mail:
+
+    python scripts/probe_dependencies.py \
+      --api-url https://sua-api.execute-api.eu-west-1.amazonaws.com
+
+O comando testa DNS, a tabela 6579 do SIDRA, listagem e download parcial dos arquivos
+SIM-DO no FTP do DataSUS e os endpoints públicos da API. Use `--check-ses` para acrescentar
+uma consulta somente leitura à conta SES configurada, ou `--json` para saída estruturada.
+O processo retorna código diferente de zero quando qualquer verificação executada falha.
+Em redes com inspeção TLS, passe o certificado corporativo em PEM com `--ca-bundle`.
+`--insecure` serve apenas para confirmar se uma falha vem da cadeia de certificados local.
+O diagnóstico também compara o FTP com a API e o arquivo ZIP anual publicados pelo
+OpenDataSUS sobre HTTPS.

@@ -7,8 +7,53 @@ datasus_cache_path <- function() {
 
 datasus_cache_key <- function(year_start, year_end, uf, information_system) {
   states <- paste(sort(as.character(uf)), collapse = "-")
-  key <- paste(information_system, year_start, year_end, states, sep = "_")
+  key <- paste("open-datasus-v1", information_system, year_start, year_end, states, sep = "_")
   gsub("[^A-Za-z0-9_.-]", "-", key)
+}
+
+fetch_open_datasus <- function(
+    year_start,
+    year_end,
+    uf,
+    information_system,
+    stop_on_error = TRUE,
+    timeout = 900) {
+  if (information_system != "SIM-DO") {
+    stop("OpenDataSUS archive loader only supports SIM-DO")
+  }
+
+  cache_dir <- datasus_cache_path()
+  output_file <- tempfile(pattern = "open-datasus-", fileext = ".csv")
+  on.exit(unlink(output_file), add = TRUE)
+  states <- paste(as.character(uf), collapse = ",")
+  status <- system2(
+    "python",
+    c(
+      "scripts/fetch_sim_archives.py",
+      "--year-start", as.character(year_start),
+      "--year-end", as.character(year_end),
+      "--states", states,
+      "--cache-dir", cache_dir,
+      "--output", output_file
+    ),
+    timeout = timeout
+  )
+  if (status != 0 || !file.exists(output_file)) {
+    stop("Unable to fetch SIM records from the official OpenDataSUS archives")
+  }
+
+  data <- read.csv(
+    output_file,
+    sep = ";",
+    quote = "\"",
+    colClasses = "character",
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  if (!nrow(data) && stop_on_error) {
+    stop("OpenDataSUS returned no data for the requested period and states")
+  }
+  data
 }
 
 read_datasus_cache <- function(path) {
@@ -53,7 +98,7 @@ fetch_datasus_cached <- function(
     year_end,
     uf,
     information_system,
-    fetch = microdatasus::fetch_datasus) {
+    fetch = fetch_open_datasus) {
   cache_dir <- datasus_cache_path()
   dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
   cache_file <- file.path(
@@ -95,7 +140,7 @@ fetch_datasus_cached <- function(
     uf = uf,
     information_system = information_system,
     stop_on_error = TRUE,
-    timeout = 60
+    timeout = 900
   )
   if (is.null(data)) {
     stop("DataSUS returned no data for the requested period and states")

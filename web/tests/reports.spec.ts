@@ -72,7 +72,10 @@ test("renders processed reports and keeps the Latte palette on mobile", async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Baixar PDF" })).toHaveAttribute("href", "http://localhost:8000/relatorios/example.pdf");
-  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(239, 241, 245)");
+  await expect(page.locator("body")).toHaveCSS("background-image", "none");
+  await expect.poll(() => page.locator("body").evaluate(
+    (body) => getComputedStyle(body, "::before").backgroundImage,
+  )).toMatch(/bg\..*\.webp/);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 

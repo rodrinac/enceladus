@@ -5,12 +5,12 @@
   color-scheme: light;
   --background: var(--color-latte-base);
   --foreground: var(--color-latte-text);
-  --card: #ffffff;
+  --card: rgb(255 250 239 / 92%);
   --card-foreground: var(--color-latte-text);
-  --popover: #ffffff;
+  --popover: #fffaf0;
   --popover-foreground: var(--color-latte-text);
   --primary: var(--color-latte-blue);
-  --primary-foreground: #ffffff;
+  --primary-foreground: #fffaf0;
   --secondary: var(--color-latte-mantle);
   --secondary-foreground: var(--color-latte-text);
   --muted: var(--color-latte-mantle);
@@ -51,32 +51,32 @@
 
 @theme {
   --font-sans: "Nunito Sans", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
-  --color-latte-rosewater: #dc8a78;
-  --color-latte-flamingo: #dd7878;
-  --color-latte-pink: #ea76cb;
-  --color-latte-mauve: #8839ef;
-  --color-latte-red: #d20f39;
-  --color-latte-maroon: #e64553;
-  --color-latte-peach: #fe640b;
-  --color-latte-yellow: #df8e1d;
-  --color-latte-green: #40a02b;
-  --color-latte-teal: #179299;
-  --color-latte-sky: #04a5e5;
-  --color-latte-sapphire: #209fb5;
-  --color-latte-blue: #1e66f5;
-  --color-latte-lavender: #7287fd;
-  --color-latte-text: #4c4f69;
-  --color-latte-subtext1: #5c5f77;
-  --color-latte-subtext0: #6c6f85;
-  --color-latte-overlay2: #7c7f93;
-  --color-latte-overlay1: #8c8fa1;
-  --color-latte-overlay0: #9ca0b0;
-  --color-latte-surface2: #acb0be;
-  --color-latte-surface1: #bcc0cc;
-  --color-latte-surface0: #ccd0da;
-  --color-latte-base: #eff1f5;
-  --color-latte-mantle: #e6e9ef;
-  --color-latte-crust: #dce0e8;
+  --color-latte-rosewater: #c7836f;
+  --color-latte-flamingo: #b86255;
+  --color-latte-pink: #9f5870;
+  --color-latte-mauve: #713d59;
+  --color-latte-red: #a72f35;
+  --color-latte-maroon: #8f3e32;
+  --color-latte-peach: #ba672d;
+  --color-latte-yellow: #a87923;
+  --color-latte-green: #55733e;
+  --color-latte-teal: #496e69;
+  --color-latte-sky: #65858a;
+  --color-latte-sapphire: #526f78;
+  --color-latte-blue: #8d432e;
+  --color-latte-lavender: #76637e;
+  --color-latte-text: #352a35;
+  --color-latte-subtext1: #554650;
+  --color-latte-subtext0: #685961;
+  --color-latte-overlay2: #786971;
+  --color-latte-overlay1: #8e7d7b;
+  --color-latte-overlay0: #a7958b;
+  --color-latte-surface2: #c2ad96;
+  --color-latte-surface1: #d7c4a9;
+  --color-latte-surface0: #e7d7bd;
+  --color-latte-base: #f7eddb;
+  --color-latte-mantle: rgb(244 231 207 / 88%);
+  --color-latte-crust: #dfc9a7;
 }
 
 @layer base {
@@ -91,6 +91,26 @@
     @apply bg-background text-foreground;
   }
 
+  body::before,
+  body::after {
+    content: "";
+    inset: 0;
+    pointer-events: none;
+    position: fixed;
+  }
+
+  body::before {
+    background: center / cover no-repeat url("./bg.webp");
+    filter: blur(7px) saturate(0.78);
+    transform: scale(1.025);
+    z-index: -2;
+  }
+
+  body::after {
+    background: rgb(47 27 34 / 36%);
+    z-index: -1;
+  }
+
   button,
   input,
   select {
@@ -100,5 +120,12 @@
   :focus-visible {
     outline: 3px solid color-mix(in srgb, var(--color-latte-blue) 45%, transparent);
     outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    backdrop-filter: blur(16px);
+    box-shadow: 0 24px 70px rgb(32 15 22 / 22%);
   }
 }

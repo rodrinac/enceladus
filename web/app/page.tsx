@@ -147,8 +147,8 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-latte-base text-latte-text">
-      <header className="border-b border-latte-surface0 bg-latte-mantle">
+    <main className="min-h-screen text-latte-text">
+      <header className="glass-panel border-b border-latte-surface0 bg-latte-mantle">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 sm:px-8">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-latte-blue">Enceladus</p>
@@ -161,7 +161,7 @@ export default function Home() {
       </header>
 
       <div className="mx-auto grid max-w-7xl gap-8 px-5 py-8 sm:px-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] lg:py-12">
-        <Card className="gap-0 self-start rounded-3xl p-6 sm:p-8">
+        <Card className="glass-panel gap-0 self-start rounded-3xl p-6 sm:p-8">
           <div className="mb-7">
             <p className="mb-2 text-sm font-bold text-latte-mauve">NOVO PEDIDO</p>
             <h2 className="text-2xl font-extrabold">Solicitar relatório</h2>
@@ -273,13 +273,13 @@ export default function Home() {
           {reportsLoading ? (
             <StatusMessage>Carregando relatórios…</StatusMessage>
           ) : reports.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-latte-overlay0 bg-latte-mantle p-10 text-center text-latte-subtext0">
+            <div className="glass-panel rounded-3xl border border-dashed border-latte-overlay0 bg-latte-mantle p-10 text-center text-latte-subtext0">
               Nenhum relatório foi processado ainda.
             </div>
           ) : (
             <div className="space-y-3">
               {reports.map((report) => (
-                <Card className="rounded-2xl p-5" key={`${report.uri}-${report.data_processamento}`}>
+                <Card className="glass-panel rounded-2xl p-5" key={`${report.uri}-${report.data_processamento}`}>
                   <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                     <div>
                       <h3 className="font-extrabold">{report.tipo}</h3>
@@ -303,7 +303,7 @@ export default function Home() {
         </section>
       </div>
 
-      <footer className="border-t border-latte-surface0 bg-latte-mantle px-5 py-6 text-center text-sm text-latte-subtext0">
+      <footer className="glass-panel border-t border-latte-surface0 bg-latte-mantle px-5 py-6 text-center text-sm text-latte-subtext0">
         Enceladus Big Data · Sociedade Brasileira de Queimaduras
       </footer>
     </main>
