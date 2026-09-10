@@ -11,4 +11,6 @@
 web/.next/
 web/node_modules/
 web/out/
+web/playwright-report/
+web/test-results/
 src/data/static/populacao-estimada-2020.csv

@@ -15,8 +15,8 @@ nome_arquivo <- args[[4]]
 diretorio_de_trabalho <- args[[5]]
 
 
-ano_inicio <- strftime(data_inicio, "%Y")
-ano_fim <- strftime(data_fim, "%Y")
+ano_inicio <- as.integer(strftime(data_inicio, "%Y"))
+ano_fim <- as.integer(strftime(data_fim, "%Y"))
 
 source("rscripts/codigos_cid10.R")
 

@@ -9,8 +9,8 @@ library(lubridate)
 args <- commandArgs(TRUE)
 
 estados <- strsplit(args[[1]], ",")
-ano_inicio <- args[[2]]
-ano_fim <- args[[3]]
+ano_inicio <- as.integer(args[[2]])
+ano_fim <- as.integer(args[[3]])
 nome_arquivo <- args[[4]]
 diretorio_de_trabalho <- args[[5]]
 

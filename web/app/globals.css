@@ -1,4 +1,53 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+:root {
+  color-scheme: light;
+  --background: var(--color-latte-base);
+  --foreground: var(--color-latte-text);
+  --card: #ffffff;
+  --card-foreground: var(--color-latte-text);
+  --popover: #ffffff;
+  --popover-foreground: var(--color-latte-text);
+  --primary: var(--color-latte-blue);
+  --primary-foreground: #ffffff;
+  --secondary: var(--color-latte-mantle);
+  --secondary-foreground: var(--color-latte-text);
+  --muted: var(--color-latte-mantle);
+  --muted-foreground: var(--color-latte-subtext0);
+  --accent: var(--color-latte-surface0);
+  --accent-foreground: var(--color-latte-text);
+  --destructive: var(--color-latte-red);
+  --border: var(--color-latte-surface0);
+  --input: var(--color-latte-surface1);
+  --ring: var(--color-latte-blue);
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
 
 @theme {
   --font-sans: "Nunito Sans", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
@@ -33,11 +82,13 @@
 @layer base {
   * {
     box-sizing: border-box;
+    @apply border-border;
   }
 
   body {
     margin: 0;
     font-family: var(--font-sans);
+    @apply bg-background text-foreground;
   }
 
   button,
@@ -49,20 +100,5 @@
   :focus-visible {
     outline: 3px solid color-mix(in srgb, var(--color-latte-blue) 45%, transparent);
     outline-offset: 2px;
-  }
-}
-
-@layer components {
-  .control {
-    width: 100%;
-    border: 1px solid var(--color-latte-surface1);
-    border-radius: 0.75rem;
-    background: white;
-    padding: 0.75rem 0.875rem;
-    color: var(--color-latte-text);
-  }
-
-  .control:hover {
-    border-color: var(--color-latte-overlay0);
   }
 }

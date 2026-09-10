@@ -46,6 +46,10 @@ def preparar_e_enviar_diagrama_async(estados: str, ano_inicio: str, ano_fim: str
         logger.info('Executou comando R com status %s.', p.returncode)
 
         if (p.returncode != 0):
+            logger.error(
+                'Falha ao gerar relatório %s (requisição %s): %s',
+                id_relatorio, id_requisicao, streamdata.decode(errors='replace'),
+            )
             return
 
         storage.salvar_data_processamento(id_relatorio, file_path.name)

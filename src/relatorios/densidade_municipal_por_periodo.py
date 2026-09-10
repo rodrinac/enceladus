@@ -47,6 +47,10 @@ def preparar_e_enviar_relatorio_async(estado: str, data_inicio: str, data_fim: s
         logger.info('Executou comando R com status %s.', p.returncode)
 
         if (p.returncode != 0):
+            logger.error(
+                'Falha ao gerar relatório %s (requisição %s): %s',
+                id_relatorio, id_requisicao, streamdata.decode(errors='replace'),
+            )
             return
         
         storage.salvar_data_processamento(id_relatorio, file_path.name)
