@@ -8,6 +8,9 @@ services:
       AWS_DEFAULT_REGION: eu-west-1
       AWS_REGION: eu-west-1
       ENCELADUS_POPULATION_DATA_PATH: /var/lib/enceladus/data/population.csv
+      ENCELADUS_DATASUS_MAX_YEAR_PATH: /var/lib/enceladus/data/datasus-max-year.txt
+      ENCELADUS_DATASUS_CACHE_PATH: /var/lib/enceladus/relatorios/.cache/datasus
+      ENCELADUS_DATASUS_CACHE_MAX_BYTES: ${ENCELADUS_DATASUS_CACHE_MAX_BYTES:-5368709120}
       REDIS_HOST: redis
     depends_on:
       population-data:
@@ -25,6 +28,8 @@ services:
     image: ${APP_IMAGE:?APP_IMAGE is required}
     command: ["python", "/app/docker/ibge/fetch_population.py"]
     env_file: .env
+    environment:
+      DATASUS_MAX_YEAR_FALLBACK: 2024
     restart: "no"
     user: "0:0"
     volumes:

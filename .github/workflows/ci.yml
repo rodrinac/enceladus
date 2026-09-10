@@ -47,3 +47,11 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose config --quiet
       - run: docker compose build
+      - name: Validate R report inputs and DataSUS cache
+        run: |
+          docker compose run --rm --no-deps \
+            --volume "$PWD/tests:/app/tests:ro" \
+            app Rscript /app/tests/test_report_years.R
+          docker compose run --rm --no-deps \
+            --volume "$PWD/tests:/app/tests:ro" \
+            app Rscript /app/tests/test_datasus_cache.R

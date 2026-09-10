@@ -73,6 +73,14 @@ export default function Home() {
       .then((loadedConfiguration) => {
         setConfiguration(loadedConfiguration);
         setSelectedReportId(loadedConfiguration.reportTypes[0]?.id ?? "");
+        const capYear = loadedConfiguration.availableYears.at(-1);
+        if (capYear) {
+          const startYear = loadedConfiguration.availableYears.includes(capYear - 1)
+            ? capYear - 1
+            : loadedConfiguration.availableYears.at(0) ?? capYear;
+          setStartDate(`${startYear}-01-01`);
+          setEndDate(`${capYear}-12-31`);
+        }
       })
       .catch(() => setConfigurationError("Não foi possível carregar a configuração da API."));
 

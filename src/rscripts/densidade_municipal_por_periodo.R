@@ -19,8 +19,9 @@ ano_inicio <- as.integer(strftime(data_inicio, "%Y"))
 ano_fim <- as.integer(strftime(data_fim, "%Y"))
 
 source("rscripts/codigos_cid10.R")
+source("rscripts/fetch_datasus_cached.R")
 
-dados <- fetch_datasus(
+dados <- fetch_datasus_cached(
   year_start = ano_inicio,
   year_end = ano_fim,
   uf = estado,

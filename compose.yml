@@ -11,6 +11,9 @@ services:
       AWS_DEFAULT_REGION: eu-west-1
       AWS_REGION: eu-west-1
       ENCELADUS_POPULATION_DATA_PATH: /var/lib/enceladus/data/population.csv
+      ENCELADUS_DATASUS_MAX_YEAR_PATH: /var/lib/enceladus/data/datasus-max-year.txt
+      ENCELADUS_DATASUS_CACHE_PATH: /var/lib/enceladus/.cache/datasus
+      ENCELADUS_DATASUS_CACHE_MAX_BYTES: ${ENCELADUS_DATASUS_CACHE_MAX_BYTES:-5368709120}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
     depends_on:
@@ -30,6 +33,7 @@ services:
       context: docker/ibge
     environment:
       IBGE_POPULATION_PERIOD: ${IBGE_POPULATION_PERIOD:-last%201}
+      DATASUS_MAX_YEAR_FALLBACK: 2024
     restart: "no"
     volumes:
       - population-data:/data

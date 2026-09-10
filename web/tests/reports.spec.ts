@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("http://localhost:8000/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     const responses: Record<string, unknown> = {
-      "/config/anos": Array.from({ length: new Date().getFullYear() - 2013 }, (_, index) => 2014 + index),
+      "/config/anos": Array.from({ length: 11 }, (_, index) => 2014 + index),
       "/config/estados": [{ DF: "Distrito Federal" }, { MG: "Minas Gerais" }],
       "/config/relatorios": reportTypes,
       "/relatorios/processados": [],
@@ -28,11 +28,16 @@ test.beforeEach(async ({ page }) => {
 test("submits dates after 2019 and preserves multiple/single state selection", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("Nenhum relatório foi processado ainda.")).toBeVisible();
+  await expect(page.getByLabel("Data inicial")).toHaveValue("2023-01-01");
+  await expect(page.getByLabel("Data final")).toHaveValue("2024-12-31");
+  const faviconUrl = await page.locator('link[rel="icon"]').getAttribute("href");
+  expect(faviconUrl).toBeTruthy();
+  expect((await page.request.get(new URL(faviconUrl!, page.url()).toString())).status()).toBe(200);
   await page.getByRole("checkbox", { name: "Distrito Federal" }).check();
   await page.getByRole("checkbox", { name: "Minas Gerais" }).check();
   await page.getByLabel("Data inicial").fill("2024-01-01");
   await page.getByLabel("Data final").fill("2024-12-31");
-  await expect(page.getByLabel("Data final")).toHaveAttribute("max", `${new Date().getFullYear()}-12-31`);
+  await expect(page.getByLabel("Data final")).toHaveAttribute("max", "2024-12-31");
   await page.getByLabel("E-mail").fill("test@example.invalid");
   const submitted = page.waitForRequest((request) => request.method() === "POST");
   await page.getByRole("button", { name: "Processar relatório" }).click();
@@ -78,8 +83,8 @@ test("shows configuration and submission errors", async ({ page }) => {
   await page.unroute("**/config/anos");
   await page.reload();
   await page.getByRole("checkbox", { name: "Distrito Federal" }).check();
-  await page.getByLabel("Data inicial").fill("2025-01-01");
-  await page.getByLabel("Data final").fill("2025-12-31");
+  await page.getByLabel("Data inicial").fill("2024-01-01");
+  await page.getByLabel("Data final").fill("2024-12-31");
   await page.getByLabel("E-mail").fill("test@example.invalid");
   await page.route("**/relatorios/queimaduras/**", (route) => route.fulfill({ status: 500 }));
   await page.getByRole("button", { name: "Processar relatório" }).click();
