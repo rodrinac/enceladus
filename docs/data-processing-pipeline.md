@@ -89,7 +89,7 @@ Cada wrapper:
 1. calcula o nome estável do PDF a partir do tipo, estados e período;
 2. cria um diretório temporário com o `id_requisicao`;
 3. reutiliza o PDF se já existir;
-4. caso contrário, inicia o script R com `subprocess.Popen`, captura stdout e stderr juntos e espera sua conclusão;
+4. caso contrário, inicia o script R pelo `run_rscript` compartilhado, captura stdout e stderr juntos e espera sua conclusão;
 5. se o R terminar com código diferente de zero, registra o erro e encerra sem salvar metadado nem enviar e-mail;
 6. em caso de sucesso, grava no Redis a data de processamento;
 7. abre o PDF e chama `src/send_email.py`.
@@ -234,7 +234,7 @@ Para investigar uma requisição específica, o primeiro ponto de correlação �
 
 Executar o R em um processo separado continua sendo a opção mais segura para esta aplicação. Os relatórios são pesados, usam bibliotecas R com estado próprio e já rodam fora da thread do servidor; manter essa fronteira também impede que uma falha do runtime R derrube o processo HTTP.
 
-A melhoria imediata é concentrar as três implementações duplicadas em um único `ReportRunner` Python. Para o caso atual, ele pode usar `subprocess.run(..., check=True, text=True, stdout=PIPE, stderr=STDOUT, timeout=...)`, registrar a saída com o código da requisição e padronizar timeout e erros. Isso deixa a chamada mais declarativa sem alterar a arquitetura ou o isolamento entre runtimes.
+A melhoria imediata é concentrar as três implementações duplicadas em um único `ReportRunner` Python. A implementação usa `subprocess.run(..., check=False, text=True, stdout=PIPE, stderr=STDOUT, timeout=...)`, registra a saída com o código da requisição e padroniza timeout e código de erro. Isso deixa a chamada mais declarativa sem alterar a arquitetura ou o isolamento entre runtimes.
 
 Alternativas avaliadas:
 
