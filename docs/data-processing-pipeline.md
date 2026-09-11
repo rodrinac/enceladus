@@ -227,3 +227,44 @@ Há dois fluxos independentes:
 | SES | MessageId no log | PDF continua disponível, sem retentativa de e-mail |
 
 Para investigar uma requisição específica, o primeiro ponto de correlação é o `id_requisicao` nos logs do contêiner `app`. O endpoint `/health` confirma somente que o processo HTTP responde; ele não testa OpenDataSUS, SIDRA, Redis, renderização R ou SES.
+
+## 14. Evoluções recomendadas
+
+### Integração entre Python e R
+
+Executar o R em um processo separado continua sendo a opção mais segura para esta aplicação. Os relatórios são pesados, usam bibliotecas R com estado próprio e já rodam fora da thread do servidor; manter essa fronteira também impede que uma falha do runtime R derrube o processo HTTP.
+
+A melhoria imediata é concentrar as três implementações duplicadas em um único `ReportRunner` Python. Para o caso atual, ele pode usar `subprocess.run(..., check=True, text=True, stdout=PIPE, stderr=STDOUT, timeout=...)`, registrar a saída com o código da requisição e padronizar timeout e erros. Isso deixa a chamada mais declarativa sem alterar a arquitetura ou o isolamento entre runtimes.
+
+Alternativas avaliadas:
+
+- **rpy2:** incorpora o R ao processo Python e permite chamar funções R diretamente. A interface parece mais elegante, mas acopla instalação, memória, estado e falhas dos dois runtimes. Também exige revisar cuidadosamente concorrência e ciclo de vida do R embutido. Não é a melhor troca para trabalhos longos disparados por um servidor assíncrono.
+- **Plumber:** transforma as rotinas R em uma API HTTP separada. É uma boa fronteira se o processamento R precisar escalar e ser implantado independentemente, mas hoje acrescentaria outro serviço, autenticação interna, observabilidade, health checks e retentativas sem eliminar a necessidade de uma fila.
+- **Fila com worker dedicado:** é a evolução recomendada quando confiabilidade for prioridade. A API publica o trabalho em SQS (ou em uma fila Redis apropriada), e um worker executa o mesmo comando R isolado. Isso remove a dependência do executor em memória do Quart e permite retentativas e controle explícito de concorrência.
+
+Portanto, a recomendação incremental é primeiro criar o `ReportRunner` compartilhado, depois separar o worker por meio de uma fila. Trocar `subprocess` por uma ponte embutida não resolve a principal fragilidade operacional.
+
+### Status de processamento na interface
+
+É possível expor o status usando o Redis já existente, sem esperar pela migração para uma fila. Cada requisição teria uma chave própria, por exemplo `processamento.<id_requisicao>`, com TTL e os campos:
+
+```text
+id, tipo, estados, data_inicio, data_fim
+status = queued | running | succeeded | failed
+criado_em, iniciado_em, finalizado_em
+uri (somente quando concluído)
+mensagem (erro público genérico, sem e-mail ou stack trace)
+```
+
+O fluxo mínimo seria:
+
+1. a rota `POST` grava `queued` antes de responder `202`;
+2. o executor grava `running` ao começar;
+3. ao publicar o PDF, grava `succeeded` e a URI;
+4. qualquer exceção grava `failed`, enquanto o detalhe técnico permanece apenas nos logs;
+5. `GET /relatorios` lista trabalhos recentes, inclusive em andamento, e `GET /relatorios/<id>` permite consultar um pedido específico;
+6. a UI faz polling enquanto houver itens `queued` ou `running` e exibe badges “Na fila”, “Processando”, “Concluído” e “Falhou”; o botão de download aparece apenas em `succeeded`.
+
+A interface pode guardar no `localStorage` os IDs criados naquele navegador para acompanhar imediatamente um pedido. A listagem geral deve vir da API, pois depender apenas do navegador esconderia trabalhos feitos por outros dispositivos.
+
+Esse status melhora visibilidade, mas não torna o processamento durável: hoje um restart do contêiner pode perder uma tarefa que está apenas no `run_in_executor`. Para garantir execução, o status deve evoluir junto com SQS e um worker. A tabela pode então ser alimentada diretamente pelos estados da fila, preservando o mesmo contrato HTTP e os mesmos badges da UI.
