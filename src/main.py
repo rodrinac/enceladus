@@ -1,10 +1,12 @@
 import asyncio
 import logging.config
 import uuid
+from functools import partial
 
 from quart import Quart, Response, jsonify, request
 from quart_cors import cors
 
+import job_status
 from default_config import defaultConfig
 from relatorios import (
     casos_mensais_por_municipio_por_estado,
@@ -51,6 +53,25 @@ def relatorios_disponiveis():
 def get_relatorios_processados():
     return jsonify(relatorios.listar_relatorios_processados())
 
+
+def _nome_relatorio(report_id: str) -> str:
+    return next(report["nome"] for report in defaultConfig.relatorios() if report["id"] == report_id)
+
+
+def _processar_relatorio(id_requisicao: str, worker, *args) -> None:
+    job_status.mark_running(id_requisicao)
+    try:
+        success = worker(*args, id_requisicao)
+    except Exception:
+        logging.getLogger(__name__).exception("Falha ao processar requisição %s.", id_requisicao)
+        job_status.mark_failed(id_requisicao)
+        return
+
+    if success:
+        job_status.mark_succeeded(id_requisicao)
+    else:
+        job_status.mark_failed(id_requisicao)
+
 ## Densidade municipal por período geral
 
 
@@ -75,9 +96,14 @@ async def post_relatorio_queimaduras_geral():
     email_param = request.args.get('email')
 
     id_req = str(uuid.uuid1())
+    job_status.register(id_req, _nome_relatorio('DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL'), estados_param,
+                        data_inicio_param, data_fim_param)
 
-    asyncio.get_event_loop().run_in_executor(None, densidade_municipal_por_periodo_geral.preparar_e_enviar_relatorio_async,
-                                             estados_param, data_inicio_param, data_fim_param, email_param, id_req)
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        partial(_processar_relatorio, id_req, densidade_municipal_por_periodo_geral.preparar_e_enviar_relatorio_async,
+                estados_param, data_inicio_param, data_fim_param, email_param),
+    )
 
     return dict(destino=email_param, id_requisicao=id_req), 202
 
@@ -105,9 +131,14 @@ async def post_relatorio_queimaduras():
     email_param = request.args.get('email')
 
     id_req = str(uuid.uuid1())
+    job_status.register(id_req, _nome_relatorio('DENSIDADE_MUNICIPAL_POR_PERIODO'), [estados_param],
+                        data_inicio_param, data_fim_param)
 
-    asyncio.get_event_loop().run_in_executor(None, densidade_municipal_por_periodo.preparar_e_enviar_relatorio_async,
-                                             estados_param, data_inicio_param, data_fim_param, email_param, id_req)
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        partial(_processar_relatorio, id_req, densidade_municipal_por_periodo.preparar_e_enviar_relatorio_async,
+                estados_param, data_inicio_param, data_fim_param, email_param),
+    )
 
     return dict(destino=email_param, id_requisicao=id_req), 202
 
@@ -135,9 +166,14 @@ async def post_relatorio_queimaduras_2():
     email_param = request.args.get('email')
 
     id_req = str(uuid.uuid1())
+    job_status.register(id_req, _nome_relatorio('CASOS_MENSAIS_POR_MUNICIPIO_POR_ESTADO'), estados_param,
+                        ano_inicio_param, ano_fim_param)
 
-    asyncio.get_event_loop().run_in_executor(None, casos_mensais_por_municipio_por_estado.preparar_e_enviar_diagrama_async,
-                                             estados_param, ano_inicio_param, ano_fim_param, email_param, id_req)
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        partial(_processar_relatorio, id_req, casos_mensais_por_municipio_por_estado.preparar_e_enviar_diagrama_async,
+                estados_param, ano_inicio_param, ano_fim_param, email_param),
+    )
 
     return dict(destino=email_param, id_requisicao=id_req), 202
 

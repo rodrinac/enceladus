@@ -5,6 +5,7 @@ from pathlib import Path
 
 import storage
 from default_config import defaultConfig
+from job_status import list_jobs
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -29,9 +30,24 @@ def listar_relatorios_processados():
                 data_inicio=partes_nome[1],
                 data_fim=partes_nome[2],
                 uri=f"{diretorio.get('path')}/{nome_base}",
-                data_processamento=datas_processamento.get(chave_redis)
+                data_processamento=datas_processamento.get(chave_redis),
+                id_requisicao=None,
+                mensagem=None,
+                status="succeeded",
+                criado_em=datas_processamento.get(chave_redis),
             ))
 
-    relatorios.sort(key=lambda relatorio: datetime.strptime(relatorio.get('data_processamento'), "%d/%m/%Y %H:%M:%S"), reverse=True)
+    relatorios.extend(list_jobs())
+    relatorios.sort(key=_ordenar_por_data, reverse=True)
 
     return relatorios
+
+
+def _ordenar_por_data(relatorio):
+    value = relatorio.get('criado_em') or relatorio.get('data_processamento')
+    if not value:
+        return datetime.min
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.strptime(value, "%d/%m/%Y %H:%M:%S")

@@ -27,7 +27,7 @@ test.beforeEach(async ({ page }) => {
 
 test("submits dates after 2019 and preserves multiple/single state selection", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Nenhum relatório foi processado ainda.")).toBeVisible();
+  await expect(page.getByText("Nenhum relatório foi solicitado ainda.")).toBeVisible();
   await expect(page.getByLabel("Data inicial")).toHaveValue("2023-01-01");
   await expect(page.getByLabel("Data final")).toHaveValue("2024-12-31");
   const faviconUrl = await page.locator('link[rel="icon"]').getAttribute("href");
@@ -67,14 +67,20 @@ test("submits dates after 2019 and preserves multiple/single state selection", a
 test("renders processed reports and keeps the Latte palette on mobile", async ({ page }) => {
   await page.route("**/relatorios/processados", (route) => route.fulfill({ json: [{
     tipo: "Densidade geral", estado: "DF", data_inicio: "2024-01-01", data_fim: "2024-12-31",
-    data_processamento: "10/09/2026 12:00:00", uri: "/relatorios/example.pdf",
+    data_processamento: "10/09/2026 12:00:00", id_requisicao: null, mensagem: null,
+    status: "succeeded", uri: "/relatorios/example.pdf",
+  }, {
+    tipo: "Casos mensais", estado: "MG", data_inicio: "2024", data_fim: "2024",
+    criado_em: "2026-09-11T12:00:00", data_processamento: null, id_requisicao: "request-1",
+    mensagem: null, status: "running",
   }] }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  const reportsRegion = page.getByRole("region", { name: "Relatórios processados" });
+  const reportsRegion = page.getByRole("region", { name: "Relatórios" });
   await expect(reportsRegion).toHaveCSS("color", "rgb(48, 36, 47)");
   await expect(reportsRegion).toHaveCSS("background-color", "rgba(255, 250, 239, 0.92)");
   await expect(page.getByRole("link", { name: "Baixar PDF" })).toHaveAttribute("href", "http://localhost:8000/relatorios/example.pdf");
+  await expect(page.getByText("Processando")).toBeVisible();
   await expect(page.locator("body")).toHaveCSS("background-image", "none");
   await expect.poll(() => page.locator("body").evaluate(
     (body) => getComputedStyle(body, "::before").backgroundImage,

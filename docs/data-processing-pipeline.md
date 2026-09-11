@@ -60,10 +60,11 @@ As rotas correspondentes ficam em `src/main.py`. A API:
 
 1. lê os parâmetros;
 2. cria `id_requisicao` com `uuid.uuid1()`;
-3. agenda a função Python do relatório com `asyncio.get_event_loop().run_in_executor(None, ...)`;
-4. devolve imediatamente HTTP `202`, destino e código da requisição.
+3. registra `queued` no registro de status em memória (`src/job_status.py`);
+4. agenda a função Python do relatório via `_processar_relatorio`, que marca `running` ao iniciar e `succeeded` ou `failed` no desfecho;
+5. devolve imediatamente HTTP `202`, destino e código da requisição.
 
-Não existe atualmente uma fila durável nem endpoint de estado por `id_requisicao`. O identificador serve para correlacionar logs e nomear o diretório temporário. Reiniciar o processo ou o contêiner pode interromper tarefas em andamento.
+O registro de status é intencionalmente em memória: um restart do processo o esvazia. Não existe fila durável nem endpoint de estado por `id_requisicao`; o identificador também serve para correlacionar logs e nomear o diretório temporário. Reiniciar o processo ou o contêiner pode interromper tarefas em andamento e apagar os status pendentes.
 
 ## 4. Entrada AWS e execução da API
 
@@ -194,7 +195,7 @@ Após uma geração nova, `src/storage.py` grava no Redis:
 dataProcessamento.<id-do-relatorio>.<nome-do-pdf> = DD/MM/AAAA HH:MM:SS
 ```
 
-`GET /relatorios/processados` usa `src/relatorios/relatorios.py` para varrer os PDFs, reconstruir estado e período a partir do nome e juntar a data armazenada no Redis. A interface consulta essa rota periodicamente. Os endpoints `GET` específicos leem o PDF do disco e o devolvem com `Content-Type: application/pdf`.
+`GET /relatorios/processados` usa `src/relatorios/relatorios.py` para varrer os PDFs, reconstruir estado e período a partir do nome e juntar a data armazenada no Redis. A lista também mescla os trabalhos pendentes do registro em memória (`queued`, `running`, `failed`), exercendo a mesma ordenação por data. A interface consulta essa rota periodicamente. Os endpoints `GET` específicos leem o PDF do disco e o devolvem com `Content-Type: application/pdf`.
 
 Redis usa AOF e volume persistente. A implementação atual presume que todo PDF encontrado possui uma data válida no Redis; um arquivo órfão pode causar erro durante a ordenação da lista.
 
@@ -219,7 +220,7 @@ Há dois fluxos independentes:
 | --- | --- | --- |
 | Configuração do navegador | Mensagem na interface | Formulário fica indisponível |
 | Aceite do pedido | HTTP `202` + `id_requisicao` | Erro HTTP aparece na interface |
-| Processamento assíncrono | Logs da aplicação pelo código | Não há consulta de status pela UI |
+| Processamento assíncrono | Status em memória + logs pelo código | Badge “Falhou” na UI; restart limpa os status |
 | OpenDataSUS | Log capturado do R/Python | Rscript termina com erro; sem e-mail |
 | Cache concorrente | RDS ou diretório `.lock` | Espera até 300 s; lock velho é removido |
 | Renderização | Código de saída do Rscript | PDF não é registrado nem enviado |
@@ -246,7 +247,9 @@ Portanto, a recomendação incremental é primeiro criar o `ReportRunner` compar
 
 ### Status de processamento na interface
 
-É possível expor o status usando o Redis já existente, sem esperar pela migração para uma fila. Cada requisição teria uma chave própria, por exemplo `processamento.<id_requisicao>`, com TTL e os campos:
+Uma versão mínima em memória já está implementada em `src/job_status.py`: a rota `POST` registra `queued` antes do `202`, o executor marca `running` ao começar e, no desfecho, `succeeded` (removendo o trabalho, pois o PDF passa a ser a fonte de verdade) ou `failed` com uma mensagem pública. `GET /relatorios/processados` mescla esses trabalhos com os PDFs concluídos, e a UI exibe badges “Na fila”, “Processando”, “Concluído” e “Falhou”, mostrando o botão de download apenas em `succeeded`.
+
+Para tornar o status durável, é possível expô-lo usando o Redis já existente, sem esperar pela migração para uma fila. Cada requisição teria uma chave própria, por exemplo `processamento.<id_requisicao>`, com TTL e os campos:
 
 ```text
 id, tipo, estados, data_inicio, data_fim
