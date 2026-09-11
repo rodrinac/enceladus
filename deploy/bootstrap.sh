@@ -6,6 +6,7 @@
 #
 # Emits GitHub Actions workflow commands so progress groups render in job logs.
 set -Eeuo pipefail
+export HOME="${HOME:-/root}"
 
 repo=/opt/enceladus
 legacy_repo=/opt/enceladus.legacy

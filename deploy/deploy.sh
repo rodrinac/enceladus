@@ -7,6 +7,7 @@
 # Emits GitHub Actions workflow commands so the phases render as collapsible
 # groups and failures appear prominently in the Deploy API to EC2 job log.
 set -Eeuo pipefail
+export HOME="${HOME:-/root}"
 
 ref=${1:-${SOURCE_REF:-main}}
 region=eu-west-1
