@@ -103,6 +103,11 @@ if [[ ! -x /nix/var/nix/profiles/default/bin/nix ]]; then
   export PATH="/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
 fi
 nix --version
+# Flake builds need the nix-command and flakes experimental features; the
+# stock installer's nix.conf does not enable them.
+if ! grep -q 'experimental-features' /etc/nix/nix.conf 2>/dev/null; then
+  echo 'experimental-features = nix-command flakes' >>/etc/nix/nix.conf
+fi
 echo "::endgroup::"
 
 # Migrating an existing Docker-era host: stop the legacy Compose stack so it
