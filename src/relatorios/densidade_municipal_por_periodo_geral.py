@@ -1,9 +1,9 @@
 import logging
 import shutil
-from subprocess import PIPE, STDOUT, Popen
 
 import storage
 from default_config import defaultConfig
+from report_runner import run_rscript
 from send_email import send_email
 from settings import SOURCE_ROOT, settings
 
@@ -42,19 +42,18 @@ def preparar_e_enviar_relatorio_async(estados: list, data_inicio: str, data_fim:
     working_path.mkdir(parents=True, exist_ok=True)
 
     if not file_path.exists():
-        p = Popen(['Rscript', settings.r_scripts_dir / 'densidade_municipal_por_periodo_geral.R', ','.join(estados),
-                  data_inicio, data_fim, file_path, working_path], stdout=PIPE, stdin=PIPE,
-                  stderr=STDOUT, cwd=SOURCE_ROOT)
+        p = run_rscript(settings.r_scripts_dir / 'densidade_municipal_por_periodo_geral.R',
+                        [','.join(estados), data_inicio, data_fim, file_path, working_path], cwd=SOURCE_ROOT)
 
-        streamdata = p.communicate()[0]
+        streamdata = p.stdout or ''
 
-        logger.debug('Retorno da execução: %s', streamdata.decode())
+        logger.debug('Retorno da execução: %s', streamdata)
         logger.info('Executou comando R com status %s.', p.returncode)
 
         if (p.returncode != 0):
             logger.error(
                 'Falha ao gerar relatório %s (requisição %s): %s',
-                id_relatorio, id_requisicao, streamdata.decode(errors='replace'),
+                id_relatorio, id_requisicao, streamdata,
             )
             return
         

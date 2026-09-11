@@ -18,9 +18,8 @@ def test_failed_report_logs_error_without_sending_email(
 ):
     module = importlib.import_module(f"relatorios.{module_name}")
     monkeypatch.setattr(module, "relatorios_folder", tmp_path)
-    process = Mock(returncode=1)
-    process.communicate.return_value = (b"year_start must be a single whole number", None)
-    monkeypatch.setattr(module, "Popen", Mock(return_value=process))
+    process = Mock(returncode=1, stdout="year_start must be a single whole number")
+    monkeypatch.setattr(module, "run_rscript", Mock(return_value=process))
     send_email = Mock()
     save_timestamp = Mock()
     monkeypatch.setattr(module, "send_email", send_email)
