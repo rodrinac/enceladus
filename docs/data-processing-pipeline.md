@@ -23,7 +23,7 @@ O aceite HTTP e o processamento são separados: uma resposta `202` informa apena
 
 ## 1. Preparação dos dados de referência
 
-Antes de iniciar a API, o serviço `population-data` executa `docker/ibge/fetch_population.py`.
+Antes de iniciar a API, o aplicativo `population` do flake Nix executa `scripts/fetch_population.py`.
 
 1. Consulta a tabela SIDRA 6579 para obter a estimativa populacional dos municípios.
 2. Valida formato, população positiva, unicidade dos códigos e uma quantidade mínima de 5.500 municípios.
@@ -33,7 +33,7 @@ Antes de iniciar a API, o serviço `population-data` executa `docker/ibge/fetch_
 6. Se o SIDRA falhar depois de três tentativas, preserva um `population.csv` anterior somente se ele ainda passar pela validação. Sem dados válidos, a inicialização falha.
 7. Se a descoberta do ano falhar, mantém o valor previamente salvo ou usa `DATASUS_MAX_YEAR_FALLBACK`, atualmente 2024.
 
-Em produção, `deploy/compose.yml` monta `/srv/enceladus/population` no contêiner da aplicação como somente leitura. A aplicação lê os caminhos pelas variáveis `ENCELADUS_POPULATION_DATA_PATH` e `ENCELADUS_DATASUS_MAX_YEAR_PATH`; os padrões estão em `src/settings.py`.
+Em produção, a unit `enceladus-population` do systemd grava os arquivos em `/srv/enceladus/population` no volume EBS. A aplicação lê os caminhos pelas variáveis `ENCELADUS_POPULATION_DATA_PATH` e `ENCELADUS_DATASUS_MAX_YEAR_PATH`; os padrões estão em `src/settings.py`.
 
 ## 2. Carregamento da interface
 
@@ -183,11 +183,11 @@ Nos dois scripts de densidade, as comparações de data atuais usam `>` e `<`; p
 
 Cada script R chama `rmarkdown::render` com um template `.Rmd` homônimo em `src/rscripts/`. Os CSVs intermediários ficam no diretório exclusivo da requisição e são passados ao template por `params`.
 
-Pandoc, LaTeX e os pacotes R necessários são instalados no `Dockerfile`. O arquivo final é gravado diretamente no diretório persistente do tipo de relatório. Falhas de download, parsing, transformação ou renderização propagam um código não zero ao wrapper Python e aparecem no log capturado do Rscript.
+Pandoc, LaTeX e os pacotes R necessários são instalados pelo flake Nix (`flake.nix`). O arquivo final é gravado diretamente no diretório persistente do tipo de relatório. Falhas de download, parsing, transformação ou renderização propagam um código não zero ao wrapper Python e aparecem no log capturado do Rscript.
 
 ## 10. Persistência, listagem e download
 
-Os PDFs ficam em subdiretórios de `settings.reports_dir`, montado sobre `/srv/enceladus/reports` em produção. Esse diretório está em um volume EBS separado e retido pela infraestrutura.
+Os PDFs ficam em subdiretórios de `settings.reports_dir`, que em produção aponta para `/srv/enceladus/relatorios`. Esse diretório está em um volume EBS separado e retido pela infraestrutura.
 
 Após uma geração nova, `src/storage.py` grava no Redis:
 
@@ -210,9 +210,9 @@ O perfil IAM da EC2 autoriza envio pelo SES. Erros de SES ocorrem depois que PDF
 Há dois fluxos independentes:
 
 - `.github/workflows/pages.yml` compila o Next.js como site estático e publica `web/out` no GitHub Pages;
-- `.github/workflows/deploy-api.yml` constrói a imagem, publica no ECR por digest e usa credenciais OIDC e Systems Manager para atualizar a EC2 sem SSH.
+- `.github/workflows/deploy-api.yml` usa credenciais OIDC e Systems Manager para que a EC2 reconstrua o flake Nix e reinicie as units do systemd, sem SSH.
 
-`deploy/deploy.sh` baixa a configuração Compose, obtém o segredo Redis do Secrets Manager, faz pull da imagem e sobe os serviços. Se `/health` não responder, restaura a referência anterior da imagem. O volume EBS preserva PDFs, cache OpenDataSUS, população e Redis através de novos deploys e substituições da instância.
+`deploy/deploy.sh` atualiza o checkout em `/opt/enceladus`, obtém o segredo Redis do Secrets Manager, compila os aplicativos `api` e `population` com Nix e reinicia as units `enceladus-api` e `enceladus-population`. Se `/health` não responder, restaura o build anterior pelos out-links `current-*.previous`. O volume EBS preserva PDFs, cache OpenDataSUS, população e Redis através de novos deploys e substituições da instância.
 
 ## 13. Estados observáveis e pontos de falha
 
@@ -227,7 +227,7 @@ Há dois fluxos independentes:
 | Persistência | PDF no volume + chave Redis | Listagem depende da consistência entre ambos |
 | SES | MessageId no log | PDF continua disponível, sem retentativa de e-mail |
 
-Para investigar uma requisição específica, o primeiro ponto de correlação é o `id_requisicao` nos logs do contêiner `app`. O endpoint `/health` confirma somente que o processo HTTP responde; ele não testa OpenDataSUS, SIDRA, Redis, renderização R ou SES.
+Para investigar uma requisição específica, o primeiro ponto de correlação é o `id_requisicao` nos logs da unit `enceladus-api`. O endpoint `/health` confirma somente que o processo HTTP responde; ele não testa OpenDataSUS, SIDRA, Redis, renderização R ou SES.
 
 ## 14. Evoluções recomendadas
 

@@ -47,11 +47,11 @@ class Settings:
             data_dir=SOURCE_ROOT / "data",
             datasus_max_year_path=_get_path(
                 "ENCELADUS_DATASUS_MAX_YEAR_PATH",
-                APP_HOME / "data" / "datasus-max-year.txt",
+                app_home / "data" / "datasus-max-year.txt",
             ),
             population_data_path=_get_path(
                 "ENCELADUS_POPULATION_DATA_PATH",
-                APP_HOME / "data" / "population.csv",
+                app_home / "data" / "population.csv",
             ),
             redis_db=int(os.getenv("REDIS_DB", "0")),
             redis_host=os.getenv("REDIS_HOST", "localhost"),

@@ -46,22 +46,43 @@
               exec hypercorn --bind "''${ENCELADUS_BIND:-0.0.0.0:8000}" main:app
             '';
           };
-        in { inherit api latex pkgs python r; };
+          population = pkgs.writeShellApplication {
+            name = "enceladus-population";
+            runtimeInputs = [ python ];
+            text = ''
+              export ENCELADUS_HOME="''${ENCELADUS_HOME:-$PWD/.enceladus}"
+              mkdir -p "$ENCELADUS_HOME"
+              exec python ${self}/scripts/fetch_population.py
+            '';
+          };
+        in { inherit api latex pkgs population python r; };
     in {
-      apps = forAllSystems (system: {
-        default = {
-          type = "app";
-          program = "${(forSystem system).api}/bin/enceladus-api";
-        };
-      });
-      packages = forAllSystems (system: {
-        default = (forSystem system).api;
-      });
+      apps = forAllSystems (system:
+        let env = forSystem system;
+        in {
+          default = {
+            type = "app";
+            program = "${env.api}/bin/enceladus-api";
+          };
+          population = {
+            type = "app";
+            program = "${env.population}/bin/enceladus-population";
+          };
+        });
+      packages = forAllSystems (system:
+        let env = forSystem system;
+        in {
+          default = env.api;
+          api = env.api;
+          population = env.population;
+          redis = env.pkgs.redis;
+        });
       devShells = forAllSystems (system:
         let env = forSystem system;
         in {
           default = env.pkgs.mkShell {
-            packages = [ env.latex env.pkgs.pandoc env.python env.r ];
+            packages = [ env.latex env.pkgs.pandoc env.python env.r ]
+              ++ env.pkgs.lib.optional (!env.pkgs.stdenv.isDarwin) env.pkgs.redis;
             shellHook = ''
               export LANG=en_US.UTF-8
               unset LC_COLLATE

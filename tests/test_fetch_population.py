@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT_PATH = Path(__file__).parents[1] / "docker" / "ibge" / "fetch_population.py"
+SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "fetch_population.py"
 SPEC = importlib.util.spec_from_file_location("fetch_population", SCRIPT_PATH)
 assert SPEC and SPEC.loader
 fetch_population = importlib.util.module_from_spec(SPEC)

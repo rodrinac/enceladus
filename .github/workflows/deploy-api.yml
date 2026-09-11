@@ -6,9 +6,10 @@ on:
     paths:
       - ".github/workflows/deploy-api.yml"
       - "deploy/**"
-      - "docker/ibge/**"
-      - "Dockerfile"
+      - "flake.nix"
+      - "flake.lock"
       - "pyproject.toml"
+      - "scripts/**"
       - "src/**"
   workflow_dispatch:
 
@@ -30,29 +31,11 @@ jobs:
         with:
           aws-region: eu-west-1
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ANR }}
-      - uses: aws-actions/amazon-ecr-login@v2
-      - uses: docker/setup-buildx-action@v4
-      - name: Build and push API image
-        id: image
-        env:
-          ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
-        run: |
-          docker buildx build \
-            --platform linux/amd64 \
-            --provenance=true \
-            --sbom=true \
-            --tag "$ECR_REPOSITORY_URI:$GITHUB_SHA" \
-            --push \
-            --metadata-file image-metadata.json \
-            .
-          digest=$(jq --raw-output '.["containerimage.digest"]' image-metadata.json)
-          echo "reference=$ECR_REPOSITORY_URI@$digest" >> "$GITHUB_OUTPUT"
       - name: Deploy through Systems Manager
         env:
-          IMAGE_REFERENCE: ${{ steps.image.outputs.reference }}
           INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
         run: |
-          deploy_command="sudo curl --fail --location --retry 5 https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/deploy/deploy.sh --output /opt/enceladus/deploy.sh && sudo chmod 0755 /opt/enceladus/deploy.sh && sudo /opt/enceladus/deploy.sh $IMAGE_REFERENCE"
+          deploy_command="sudo curl --fail --location --retry 5 https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/deploy/deploy.sh --output /opt/enceladus/deploy.sh && sudo chmod 0755 /opt/enceladus/deploy.sh && sudo /opt/enceladus/deploy.sh $GITHUB_REF_NAME"
           command_id=$(aws ssm send-command \
             --document-name AWS-RunShellScript \
             --instance-ids "$INSTANCE_ID" \

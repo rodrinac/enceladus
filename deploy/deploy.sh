@@ -1,27 +1,38 @@
 #!/usr/bin/env bash
+# Deploys the Enceladus API built from the local Nix flake to the production
+# host. Refreshes the repository checkout, rebuilds the API and population
+# out-links, feeds the runtime environment (including the Redis password) to
+# the systemd units and health-checks Quart before promoting the release.
 set -Eeuo pipefail
 
-image_ref=${1:?Usage: deploy.sh IMAGE_DIGEST_REFERENCE}
+ref=${1:-${SOURCE_REF:-main}}
 region=eu-west-1
-repository_root=/opt/enceladus
+repo=/opt/enceladus
+env_file=/etc/enceladus/runtime.env
 
-if [[ ! $image_ref =~ ^[0-9]+\.dkr\.ecr\.eu-west-1\.amazonaws\.com/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]; then
-  echo "Refusing invalid image reference: $image_ref" >&2
-  exit 2
+export PATH="/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
+
+set -a
+# shellcheck disable=SC1090
+source "$env_file"
+set +a
+
+# Redis must exist before the app starts; first bootstrap builds it.
+if [[ ! -x $repo/current-redis/bin/redis-server ]]; then
+  nix build "$repo#redis" --out-link "$repo/current-redis"
+fi
+if ! systemctl is-active --quiet enceladus-redis.service; then
+  systemctl restart enceladus-redis.service
 fi
 
-# This file is provisioned by CloudFormation on the host.
-# shellcheck disable=SC1091
-source "$repository_root/runtime.env"
+# Bring the checkout up to the requested ref (deploy.sh is fetched from raw
+# GitHub before this runs, so a newer script self-updates the code).
+git -C "$repo" fetch --quiet --depth 1 origin "$ref"
+git -C "$repo" checkout --quiet --force --detach FETCH_HEAD
 
-source_base="https://raw.githubusercontent.com/$SOURCE_REPOSITORY/$SOURCE_REF/deploy"
-curl --fail --location --retry 5 "$source_base/compose.yml" \
-  --output "$repository_root/compose.yml.next"
-mv "$repository_root/compose.yml.next" "$repository_root/compose.yml"
-
-previous_image=""
-if [[ -f $repository_root/.env ]]; then
-  previous_image=$(sed -n 's/^APP_IMAGE=//p' "$repository_root/.env")
+previous_password=""
+if [[ -f $env_file ]]; then
+  previous_password=$(sed -n 's/^REDIS_PASSWORD=//p' "$env_file" | tail -1)
 fi
 
 redis_password=$(aws secretsmanager get-secret-value \
@@ -31,37 +42,59 @@ redis_password=$(aws secretsmanager get-secret-value \
   --output text)
 
 umask 077
-cat > "$repository_root/.env" <<EOF
-APP_IMAGE=$image_ref
+cat > "$env_file" <<EOF
+APP_REF=$ref
+AWS_DEFAULT_REGION=$region
+AWS_REGION=$region
 CORS_ORIGINS=$CORS_ORIGINS
+ENCELADUS_DATASUS_CACHE_MAX_BYTES=$ENCELADUS_DATASUS_CACHE_MAX_BYTES
+ENCELADUS_DATASUS_CACHE_PATH=$ENCELADUS_DATASUS_CACHE_PATH
+ENCELADUS_DATASUS_MAX_YEAR_PATH=$ENCELADUS_DATASUS_MAX_YEAR_PATH
+ENCELADUS_HOME=$ENCELADUS_HOME
+ENCELADUS_POPULATION_DATA_PATH=$ENCELADUS_POPULATION_DATA_PATH
 IBGE_POPULATION_PERIOD=$IBGE_POPULATION_PERIOD
+REDIS_HOST=$REDIS_HOST
 REDIS_PASSWORD=$redis_password
 SES_CONFIGURATION_SET=$SES_CONFIGURATION_SET
 SES_SENDER=$SES_SENDER
 EOF
 
-registry=${image_ref%%/*}
-aws ecr get-login-password --region "$region" \
-  | docker login --username AWS --password-stdin "$registry"
+if [[ -n $previous_password && $previous_password != "$redis_password" ]]; then
+  systemctl restart enceladus-redis.service
+fi
 
-cd "$repository_root"
-docker compose pull
-docker compose up --detach --remove-orphans --wait --wait-timeout 120
+nix build "$repo#api" --out-link "$repo/current-api.next"
+nix build "$repo#population" --out-link "$repo/current-population.next"
 
-if ! curl --fail --retry 12 --retry-delay 5 --retry-connrefused \
+rm -rf "$repo/current-api.previous" "$repo/current-population.previous"
+if [[ -e $repo/current-api ]]; then
+  mv "$repo/current-api" "$repo/current-api.previous"
+fi
+mv "$repo/current-api.next" "$repo/current-api"
+if [[ -e $repo/current-population ]]; then
+  mv "$repo/current-population" "$repo/current-population.previous"
+fi
+mv "$repo/current-population.next" "$repo/current-population"
+
+systemctl restart enceladus-population.service
+systemctl restart enceladus-api.service
+
+if ! curl --fail --retry 30 --retry-delay 5 --retry-connrefused \
   http://127.0.0.1:8000/health; then
-  if [[ -n $previous_image && $previous_image != "$image_ref" ]]; then
-    sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$previous_image|" "$repository_root/.env"
-    docker compose pull
-    docker compose up --detach --remove-orphans --wait --wait-timeout 120
+  rm -f "$repo/current-api"
+  if [[ -e $repo/current-api.previous ]]; then
+    mv "$repo/current-api.previous" "$repo/current-api"
   fi
-  echo "Deployment failed health checks; previous image restored" >&2
+  rm -f "$repo/current-population"
+  if [[ -e $repo/current-population.previous ]]; then
+    mv "$repo/current-population.previous" "$repo/current-population"
+  fi
+  systemctl restart enceladus-population.service
+  systemctl restart enceladus-api.service
+  echo "Deployment failed health checks; previous release restored" >&2
   exit 1
 fi
 
-docker image prune --force --filter "until=168h"
-curl --fail --location --retry 5 "$source_base/deploy.sh" \
-  --output "$repository_root/deploy.sh.next"
-chmod 0755 "$repository_root/deploy.sh.next"
-mv "$repository_root/deploy.sh.next" "$repository_root/deploy.sh"
-echo "Deployment healthy: $image_ref"
+nix-collect-garbage --quiet || true
+rm -rf "$repo/current-api.previous" "$repo/current-population.previous"
+echo "Deployment healthy: $ref"

@@ -12,11 +12,27 @@ SIDRA_URL = (
     "https://apisidra.ibge.gov.br/values/t/6579/n6/all/v/9324/"
     "p/{period}?formato=json"
 )
-OUTPUT_PATH = Path("/data/population.csv")
-DATASUS_MAX_YEAR_PATH = Path("/data/datasus-max-year.txt")
 OPEN_DATASUS_CATALOG_URL = "https://dadosabertos.saude.gov.br/dataset/sim"
 EXPECTED_FIELDS = {"D1C", "D1N", "V", "D3C"}
 MINIMUM_MUNICIPALITIES = 5_500
+
+
+def _data_dir() -> Path:
+    return (
+        Path(os.getenv("ENCELADUS_HOME", "/var/lib/enceladus")).expanduser().resolve()
+        / "data"
+    )
+
+
+OUTPUT_PATH = Path(
+    os.getenv("ENCELADUS_POPULATION_DATA_PATH", str(_data_dir() / "population.csv"))
+)
+DATASUS_MAX_YEAR_PATH = Path(
+    os.getenv(
+        "ENCELADUS_DATASUS_MAX_YEAR_PATH",
+        str(_data_dir() / "datasus-max-year.txt"),
+    )
+)
 
 
 def discover_datasus_max_year(timeout: int = 20) -> int:
