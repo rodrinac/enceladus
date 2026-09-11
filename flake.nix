@@ -73,6 +73,7 @@
         let env = forSystem system;
         in {
           default = env.api;
+          api = env.api;
           population = env.population;
           redis = env.pkgs.redis;
         });
