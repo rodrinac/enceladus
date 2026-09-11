@@ -126,6 +126,7 @@ write.csv(
 
 rmarkdown::render("rscripts/casos_mensais_por_municipio_por_estado.Rmd",
   output_file = nome_arquivo,
+  intermediates_dir = diretorio_de_trabalho,
   params = list(
     diretorio = diretorio_de_trabalho,
     ano_fim = ano_fim,

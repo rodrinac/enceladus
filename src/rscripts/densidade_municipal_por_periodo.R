@@ -158,6 +158,7 @@ write.csv(
 
 rmarkdown::render("rscripts/densidade_municipal_por_periodo.Rmd",
   output_file = nome_arquivo,
+  intermediates_dir = diretorio_de_trabalho,
   params = list(
     diretorio = diretorio_de_trabalho,
     dt_inicio = data_inicio,
