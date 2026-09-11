@@ -6,12 +6,35 @@
 #
 # Emits GitHub Actions workflow commands so progress groups render in job logs.
 set -Eeuo pipefail
+export HOME="${HOME:-/root}"
 
 repo=/opt/enceladus
+legacy_repo=/opt/enceladus.legacy
 env_file=/etc/enceladus/runtime.env
+
+echo "::group::Repository"
+# A loose Docker-era /opt/enceladus (no git work tree) gets a real checkout so
+# the flake, scripts and this bootstrap can run from it. Stacks created by the
+# current user data already clone the repository here.
+if [[ ! -d $repo/.git ]]; then
+  if [[ -d $repo ]]; then
+    mv "$repo" "$legacy_repo"
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    dnf install --assumeyes git
+  fi
+  git clone --depth 1 --branch "${SOURCE_REF:-main}" \
+    "https://github.com/${SOURCE_REPOSITORY:-rodrinac/enceladus}" "$repo"
+fi
+echo "::endgroup::"
 
 echo "::group::Runtime environment"
 mkdir --parents /etc/enceladus
+# Keep the environment CloudFormation originally injected into a Docker-era
+# host so the Nix runtime adopts the same settings.
+if [[ ! -f $repo/runtime.env && -f $legacy_repo/runtime.env ]]; then
+  cp "$legacy_repo/runtime.env" "$repo/runtime.env"
+fi
 if [[ ! -f $env_file ]]; then
   echo "Missing $env_file; synthesizing it (adopting legacy values when present)"
   legacy_env=/opt/enceladus/runtime.env
@@ -80,13 +103,24 @@ if [[ ! -x /nix/var/nix/profiles/default/bin/nix ]]; then
   export PATH="/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
 fi
 nix --version
+# Flake builds need the nix-command and flakes experimental features; the
+# stock installer's nix.conf does not enable them.
+if ! grep -q 'experimental-features' /etc/nix/nix.conf 2>/dev/null; then
+  echo 'experimental-features = nix-command flakes' >>/etc/nix/nix.conf
+fi
 echo "::endgroup::"
 
 # Migrating an existing Docker-era host: stop the legacy Compose stack so it
-# never competes with systemd for port 8000 or the data volume.
+# never competes with systemd for port 8000 or the data volume, and prune
+# images to make room for the Nix store on small root volumes.
 if command -v docker >/dev/null 2>&1; then
   echo "::group::Stop legacy Docker services"
-  (cd "$repo" || exit 1; docker compose down --timeout 30 || true)
+  for dir in "$repo" "$legacy_repo"; do
+    if [[ -f $dir/compose.yml ]]; then
+      (cd "$dir" && docker compose down --timeout 30) || true
+    fi
+  done
+  docker system prune --all --force --volumes 2>/dev/null || true
   systemctl disable --now docker.service containerd.service 2>/dev/null || true
   echo "Legacy Compose stack stopped and disabled"
 

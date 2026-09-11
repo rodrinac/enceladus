@@ -7,6 +7,7 @@
 # Emits GitHub Actions workflow commands so the phases render as collapsible
 # groups and failures appear prominently in the Deploy API to EC2 job log.
 set -Eeuo pipefail
+export HOME="${HOME:-/root}"
 
 ref=${1:-${SOURCE_REF:-main}}
 region=eu-west-1
@@ -63,8 +64,11 @@ ENCELADUS_POPULATION_DATA_PATH=$ENCELADUS_POPULATION_DATA_PATH
 IBGE_POPULATION_PERIOD=$IBGE_POPULATION_PERIOD
 REDIS_HOST=$REDIS_HOST
 REDIS_PASSWORD=$redis_password
+REDIS_SECRET_ARN=$REDIS_SECRET_ARN
 SES_CONFIGURATION_SET=$SES_CONFIGURATION_SET
 SES_SENDER=$SES_SENDER
+SOURCE_REF=$SOURCE_REF
+SOURCE_REPOSITORY=$SOURCE_REPOSITORY
 EOF
 echo "Redis password refreshed from Secrets Manager"
 echo "::endgroup::"
