@@ -258,7 +258,10 @@ export default function Home() {
           )}
         </Card>
 
-        <section aria-labelledby="processed-reports-title">
+        <section
+          aria-labelledby="processed-reports-title"
+          className="glass-panel self-start rounded-3xl border border-latte-surface0 bg-card p-6 sm:p-8"
+        >
           <div className="mb-5 flex items-end justify-between gap-4">
             <div>
               <p className="mb-2 text-sm font-bold text-latte-teal">ARQUIVO</p>
@@ -273,13 +276,13 @@ export default function Home() {
           {reportsLoading ? (
             <StatusMessage>Carregando relatórios…</StatusMessage>
           ) : reports.length === 0 ? (
-            <div className="glass-panel rounded-3xl border border-dashed border-latte-overlay0 bg-latte-mantle p-10 text-center text-latte-subtext0">
+            <div className="rounded-2xl border border-dashed border-latte-overlay0 bg-latte-mantle p-10 text-center text-latte-subtext0">
               Nenhum relatório foi processado ainda.
             </div>
           ) : (
             <div className="space-y-3">
               {reports.map((report) => (
-                <Card className="glass-panel rounded-2xl p-5" key={`${report.uri}-${report.data_processamento}`}>
+                <Card className="rounded-2xl border-latte-surface1 bg-latte-base/70 p-5 shadow-sm" key={`${report.uri}-${report.data_processamento}`}>
                   <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                     <div>
                       <h3 className="font-extrabold">{report.tipo}</h3>

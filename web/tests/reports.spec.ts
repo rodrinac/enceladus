@@ -71,6 +71,9 @@ test("renders processed reports and keeps the Latte palette on mobile", async ({
   }] }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
+  const reportsRegion = page.getByRole("region", { name: "Relatórios processados" });
+  await expect(reportsRegion).toHaveCSS("color", "rgb(48, 36, 47)");
+  await expect(reportsRegion).toHaveCSS("background-color", "rgba(255, 250, 239, 0.92)");
   await expect(page.getByRole("link", { name: "Baixar PDF" })).toHaveAttribute("href", "http://localhost:8000/relatorios/example.pdf");
   await expect(page.locator("body")).toHaveCSS("background-image", "none");
   await expect.poll(() => page.locator("body").evaluate(
