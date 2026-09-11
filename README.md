@@ -13,76 +13,68 @@ Desenvolvido por [José Inácio Rodrigues da Silva](https://github.com/josersina
 
 ## Executar localmente
 
-Docker Compose é a única forma suportada de iniciar o projeto localmente. O stack inclui
-Next.js/Nginx, Python, R, Pandoc, LaTeX, os pacotes R necessários e Redis.
+O [flake Nix](flake.nix) fornece um ambiente reprodutível com Python 3.12, R (com
+`microdatasus` e as dependências dos relatórios), Pandoc, LaTeX e os aplicativos da API
+(`enceladus-api`) e da população IBGE (`enceladus-population`):
 
-    cp .env.example .env
-    # Preencha REDIS_PASSWORD e as configurações do AWS SES.
-    docker compose up --detach --build
+    nix develop            # shell interativo com todas as ferramentas
+    nix run .#api          # inicia o Hypercorn com a API
+    nix run .#population   # busca população IBGE e o ano máximo de SIM
 
-Serviços disponíveis:
+A API espera um Redis em `localhost:6379` por padrão (`REDIS_HOST`/`REDIS_PORT`/
+`REDIS_DB` são configuráveis). Fora do Linux, suba o Redis com o gerenciador da sua
+máquina; no Linux, o dev shell já inclui o `redis` do nixpkgs. Antes de usar os
+relatórios, execute `nix run .#population` uma vez para gerar o denominador de
+densidade e o limite de anos do DataSUS.
 
-- Interface: `http://localhost:3000`
-- API: `http://localhost:8000`
-- Saúde da API: `http://localhost:8000/health`
+Para ajustar o endereço do Hypercorn:
 
-Os serviços AWS usam exclusivamente a região `eu-west-1`. Para alterar as portas
-publicadas, defina `ENCELADUS_WEB_PORT` ou `ENCELADUS_PORT` no `.env`.
+    ENCELADUS_BIND=0.0.0.0:8000 nix run .#api
 
-Comandos operacionais:
+Os arquivos de saída ficam em `ENCELADUS_HOME` (padrão `$PWD/.enceladus`): população em
+`data/`, relatórios em `relatorios/` e o cache do DataSUS em `relatorios/.cache/`.
 
-    docker compose ps
-    docker compose logs --follow app
-    docker compose down
+A interface em `web/` roda com Node.js:
 
-`docker compose down` preserva os volumes de relatórios, Redis e população. Não use a
-opção `--volumes` se quiser manter esses dados.
-
-Como alternativa ao Compose, o flake Nix em `flake.nix` fornece um ambiente reprodutível
-com Python, R, Pandoc e LaTeX (assumindo Redis local):
-
-    nix develop            # shells interativos com todas as ferramentas
-    nix run .              # inicia o Hypercorn com a API
-    ENCELADUS_BIND=0.0.0.0:8000 nix run .   # ajusta o endereço do Hypercorn
-
-A API espera `REDIS_HOST`/`REDIS_PORT`/`REDIS_DB` configuráveis; fora do Compose, o
-padrão é `localhost:6379`, banco 0. O Compose continua definindo `REDIS_HOST: redis`
-explicitamente.
+    cd web
+    npm install
+    NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 
 ## População municipal do IBGE
 
-Antes de iniciar a API, o serviço `population-data` consulta a estimativa municipal mais
+Antes de iniciar a API, o aplicativo `population` consulta a estimativa municipal mais
 recente na API SIDRA oficial do IBGE, usando a tabela 6579, variável 9324. O CSV validado
-é escrito de forma atômica no volume nomeado `population-data` e montado como somente
-leitura na API.
+é escrito de forma atômica em `ENCELADUS_POPULATION_DATA_PATH` (padrão
+`$ENCELADUS_HOME/data/population.csv`) e lido pela API em modo somente leitura.
 
 Se o IBGE estiver temporariamente indisponível, uma cópia válida já armazenada será
 reutilizada. A primeira inicialização exige acesso ao SIDRA. Para fixar um ano
-reprodutível, defina `IBGE_POPULATION_PERIOD`, por exemplo `2025`, no `.env`.
+reprodutível, defina `IBGE_POPULATION_PERIOD`, por exemplo `2025`.
 
 Para atualizar os dados manualmente:
 
-    docker compose run --rm population-data
+    nix run .#population
 
 Essas estimativas anuais são usadas como denominador dos relatórios de densidade; não são
 os resultados do Censo 2022. Consulte a
 [tabela 6579 do SIDRA](https://sidra.ibge.gov.br/tabela/6579) e a
 [página oficial das estimativas](https://www.ibge.gov.br/estatisticas/sociais/populacao/9103-estimativas-de-populacao.html).
 
-Na mesma inicialização, o serviço consulta os arquivos finais de mortalidade disponíveis
+Na mesma execução, o aplicativo consulta os arquivos finais de mortalidade disponíveis
 e grava o último ano publicado. A interface usa esse valor como limite; se a descoberta
 estiver indisponível, mantém o último valor válido ou usa 2024 na primeira execução.
 
 Os dados SIM são baixados dos arquivos anuais oficiais do OpenDataSUS sobre HTTPS e
 filtrados por estado durante a leitura. Os arquivos nacionais e resultados filtrados ficam
-no volume persistente; pedidos repetidos reutilizam o cache. Escritas são atômicas, pedidos
-concorrentes compartilham o mesmo download e os resultados mais antigos são removidos quando
-o cache ultrapassa 5 GiB. Defina `ENCELADUS_DATASUS_CACHE_MAX_BYTES` para alterar esse limite.
+em `ENCELADUS_DATASUS_CACHE_PATH`; pedidos repetidos reutilizam o cache. Escritas são
+atômicas, pedidos concorrentes compartilham o mesmo download e os resultados mais antigos
+são removidos quando o cache ultrapassa 5 GiB. Defina `ENCELADUS_DATASUS_CACHE_MAX_BYTES`
+para alterar esse limite.
 
 ## Interface e GitHub Pages
 
-A interface em `web/` usa Next.js, TypeScript, Tailwind CSS e o tema Catppuccin Latte. O
-Compose gera a exportação estática e a serve com Nginx; Python, Node.js e R não precisam
+A interface em `web/` usa Next.js, TypeScript, Tailwind CSS e o tema Catppuccin Latte. A
+exportação estática é publicada no GitHub Pages; Python, R, Pandoc e LaTeX não precisam
 ser instalados no host.
 
 O workflow `.github/workflows/pages.yml` publica a exportação estática quando há mudanças
@@ -97,10 +89,12 @@ O build detecta automaticamente o nome do repositório e configura o `basePath` 
 
 ## Produção
 
-A API é publicada em uma única instância EC2 na região `eu-west-1`. O pipeline
-usa GitHub OIDC, ECR e Systems Manager, sem chaves AWS persistentes ou acesso SSH. API
-Gateway fornece o endereço HTTPS, uma função Lambda encaminha as chamadas pela VPC e o
-volume EBS criptografado preserva relatórios, Redis e o cache do IBGE.
+A API é publicada em uma única instância EC2 na região `eu-west-1`, executando os
+aplicativos do flake Nix diretamente no host por meio de units do systemd. O pipeline
+usa GitHub OIDC e Systems Manager, sem chaves AWS persistentes, registro de contêineres
+ou acesso SSH. API Gateway fornece o endereço HTTPS, uma função Lambda encaminha as
+chamadas pela VPC e o volume EBS criptografado preserva relatórios, Redis e o cache do
+IBGE.
 
 Consulte o [guia de implantação](deploy/README.md) para provisionar a infraestrutura,
 configurar DNS, preparar os ambientes do GitHub e executar o primeiro release.
@@ -109,12 +103,13 @@ configurar DNS, preparar os ambientes do GitHub e executar o primeiro release.
 
 Após alterar a API, os scripts R ou a interface, reconstrua e valide o stack completo:
 
-    docker compose up --detach --build
-    docker compose ps
-    docker compose logs --follow app
+    nix build .#api
+    pytest
+    ruff check .
 
-O `.env` contém apenas opções externas ao stack: senha do Redis, SES, CORS e, se
-necessário, o período do IBGE e as portas publicadas. Não versione esse arquivo.
+As configurações são controladas por variáveis de ambiente (Redis, SES, CORS, períodos
+do IBGE e caminhos de dados); consulte `src/settings.py` e `.env.example` como
+referência.
 
 Para verificar cada dependência externa sem gerar relatórios ou enviar e-mail:
 

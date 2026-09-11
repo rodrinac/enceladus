@@ -1,9 +1,12 @@
 # EC2 production deployment
 
-The production API runs as Docker Compose on one EC2 instance in `eu-west-1`.
-CloudFormation creates the host, retained encrypted data volume, API Gateway/Lambda HTTPS
-proxy, Elastic IP, ECR repository, Redis secret, Systems Manager access, and GitHub OIDC
-deployment role.
+The production API runs natively from a [Nix](https://nixos.org) flake on one EC2
+instance in `eu-west-1`. CloudFormation creates the host, retained encrypted data
+volume, API Gateway/Lambda HTTPS proxy, Elastic IP, Redis secret, Systems Manager
+access, and GitHub OIDC deployment role. The host installs Nix at boot, builds the
+[`api`](../flake.nix) and `population` outputs, and manages the services with
+systemd units (`enceladus-api`, `enceladus-redis`, `enceladus-population`). There is
+no Docker, container registry, or SSH.
 
 ## Prerequisites
 
@@ -34,7 +37,10 @@ If the account already has the GitHub Actions OIDC provider, also pass its ARN a
 `GitHubOidcProviderArn`.
 
 The stack intentionally has no SSH ingress. Inspect bootstrap progress with Systems
-Manager or `/var/log/cloud-init-output.log` through a Session Manager shell.
+Manager or `/var/log/cloud-init-output.log` through a Session Manager shell. The
+first boot installs Nix, clones the repository to `/opt/enceladus`, runs
+[`deploy/bootstrap.sh`](bootstrap.sh) and builds the release closure from the local
+flake before starting the services.
 
 New SES accounts begin in the sandbox. Verify the sender from Amazon's email and request
 production access before sending reports to arbitrary recipients. A configuration set is
@@ -43,11 +49,10 @@ optional; leave `SesConfigurationSet` empty unless one already exists.
 ## Configure GitHub
 
 Create a protected GitHub environment named `production`. Add the deployment role as
-an environment secret and the remaining values as environment variables:
+an environment secret and the remaining value as an environment variable:
 
 - Secret `AWS_DEPLOY_ROLE_ANR` from `GitHubDeployRoleArn`
 - `EC2_INSTANCE_ID` from `InstanceId`
-- `ECR_REPOSITORY_URI` from `EcrRepositoryUri`
 
 Configure the repository variable `NEXT_PUBLIC_API_URL` from the stack's `ApiUrl` output
 and enable GitHub Pages with GitHub Actions as its source. Adding a required reviewer to
@@ -57,12 +62,14 @@ the `production` environment makes API releases manual-approval deployments.
 
 Run the `Deploy API to EC2` workflow manually after the GitHub variables and SES identity
 are ready. Later merges to `main` deploy automatically when API-related paths change. The
-workflow builds an AMD64 image, pushes it to ECR, and deploys its immutable digest through
-Systems Manager.
+workflow invokes `deploy/deploy.sh` on the host through Systems Manager; the script
+refreshes the `/opt/enceladus` checkout, rebuilds the flake outputs, feeds the runtime
+environment (including the Redis password from Secrets Manager) to the systemd units and
+health-checks Quart before promoting the release.
 
 The host health-checks Quart locally before the API Gateway/Lambda proxy exposes it. On
-failure it restores the prior image reference and exits unsuccessfully. Application data
-remains on the retained EBS volume.
+failure the previous build is restored (the earlier `current-*.previous` out-links) and
+the script exits unsuccessfully. Application data remains on the retained EBS volume.
 
 ## Recovery
 
@@ -70,14 +77,21 @@ Open a Session Manager shell without exposing SSH:
 
     aws ssm start-session --region eu-west-1 --target i-xxxxxxxx
 
-Inspect the stack from `/opt/enceladus`:
+Inspect the stack:
 
-    sudo docker compose ps
-    sudo docker compose logs --tail 200 app
+    sudo systemctl status enceladus-api enceladus-redis enceladus-population
+    sudo journalctl --unit enceladus-api --since "-2 hours"
+    sudo ls -l /opt/enceladus/current-* | head
 
-CloudFormation retains the data volume, Redis secret, and ECR repository if the stack is
-deleted. Reattaching a retained volume to a replacement stack is a deliberate recovery
-operation and is not automated.
+The repository and Nix store live in `/opt/enceladus` and `/nix`; the EBS volume under
+`/srv/enceladus` holds reports, Redis AOF and the IBGE/DataSUS cache. Rebuild and
+redeploy manually from the host:
+
+    sudo bash /opt/enceladus/deploy/deploy.sh main
+
+CloudFormation retains the data volume and Redis secret if the stack is deleted.
+Reattaching a retained volume to a replacement stack is a deliberate recovery operation
+and is not automated.
 
 The instance is deliberately pinned to launch-template version 1 so ordinary stack
 updates cannot replace the host before its single-attach data volume is detached. Changes

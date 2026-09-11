@@ -40,18 +40,18 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
-  containers:
+  nix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: cp .env.example .env
-      - run: docker compose config --quiet
-      - run: docker compose build
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: DeterminateSystems/magic-nix-cache-action@v9
+        with:
+          upstream_cache: true
+      - name: Build the API and population apps
+        run: |
+          nix build .#api
+          nix build .#population
       - name: Validate R report inputs and DataSUS cache
         run: |
-          docker compose run --rm --no-deps \
-            --volume "$PWD/tests:/app/tests:ro" \
-            app Rscript /app/tests/test_report_years.R
-          docker compose run --rm --no-deps \
-            --volume "$PWD/tests:/app/tests:ro" \
-            app Rscript /app/tests/test_datasus_cache.R
+          nix develop . --command bash -c 'cd src && Rscript ../tests/test_report_years.R && Rscript ../tests/test_datasus_cache.R'
