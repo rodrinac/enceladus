@@ -139,6 +139,7 @@ export default function Home() {
         kind: "success",
         message: `Relatório enviado para processamento. Código: ${response.id_requisicao}`,
       });
+      void refreshReports();
     } catch {
       setNotice({ kind: "error", message: "Não foi possível solicitar o relatório." });
     } finally {
@@ -265,7 +266,7 @@ export default function Home() {
           <div className="mb-5 flex items-end justify-between gap-4">
             <div>
               <p className="mb-2 text-sm font-bold text-latte-teal">ARQUIVO</p>
-              <h2 className="text-2xl font-extrabold" id="processed-reports-title">Relatórios processados</h2>
+              <h2 className="text-2xl font-extrabold" id="processed-reports-title">Relatórios</h2>
             </div>
             <Button variant="outline" className="bg-card" onClick={() => void refreshReports()} type="button">
               Atualizar
@@ -277,7 +278,7 @@ export default function Home() {
             <StatusMessage>Carregando relatórios…</StatusMessage>
           ) : reports.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-latte-overlay0 bg-latte-mantle p-10 text-center text-latte-subtext0">
-              Nenhum relatório foi processado ainda.
+              Nenhum relatório foi solicitado ainda.
             </div>
           ) : (
             <div className="space-y-3">
@@ -290,14 +291,22 @@ export default function Home() {
                         {report.estado} · {formatDate(report.data_inicio)} — {formatDate(report.data_fim)}
                       </p>
                       <p className="mt-2 text-xs font-bold uppercase tracking-wide text-latte-overlay1">
-                        Processado em {report.data_processamento ?? "data indisponível"}
+                        {report.status === "succeeded"
+                          ? `Processado em ${report.data_processamento ?? "data indisponível"}`
+                          : `Solicitado em ${formatDate(report.criado_em ?? "")}`}
                       </p>
+                      {report.mensagem && <p className="mt-2 text-sm text-latte-red">{report.mensagem}</p>}
                     </div>
-                    <Button asChild variant="secondary" className="bg-latte-teal/15 text-latte-teal hover:bg-latte-teal/25">
-                      <a href={apiUrl(report.uri)} rel="noreferrer" target="_blank">
-                        Baixar PDF
-                      </a>
-                    </Button>
+                    <div className="flex items-center gap-3">
+                      <ReportStatusBadge status={report.status} />
+                      {report.status === "succeeded" && report.uri && (
+                        <Button asChild variant="secondary" className="bg-latte-teal/15 text-latte-teal hover:bg-latte-teal/25">
+                          <a href={apiUrl(report.uri)} rel="noreferrer" target="_blank">
+                            Baixar PDF
+                          </a>
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </Card>
               ))}
@@ -311,6 +320,23 @@ export default function Home() {
       </footer>
     </main>
   );
+}
+
+function ReportStatusBadge({ status }: Readonly<{ status: ProcessedReport["status"] }>) {
+  const labels = {
+    failed: "Falhou",
+    queued: "Na fila",
+    running: "Processando",
+    succeeded: "Processado",
+  };
+  const styles = {
+    failed: "bg-latte-red/15 text-latte-red",
+    queued: "bg-latte-peach/15 text-latte-peach",
+    running: "bg-latte-blue/15 text-latte-blue",
+    succeeded: "bg-latte-green/15 text-latte-green",
+  };
+
+  return <Badge className={`rounded-full ${styles[status]}`}>{labels[status]}</Badge>;
 }
 
 function Field({ children, label, id }: Readonly<{ children: React.ReactNode; label: string; id: string }>) {

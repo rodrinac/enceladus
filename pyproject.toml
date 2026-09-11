@@ -26,7 +26,7 @@ dev = [
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["default_config", "main", "report_runner", "send_email", "settings", "storage"]
+py-modules = ["default_config", "job_status", "main", "report_runner", "send_email", "settings", "storage"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

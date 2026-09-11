@@ -49,7 +49,7 @@ def preparar_e_enviar_diagrama_async(estados: str, ano_inicio: str, ano_fim: str
                 'Falha ao gerar relatório %s (requisição %s): %s',
                 id_relatorio, id_requisicao, streamdata,
             )
-            return
+            return False
 
         storage.salvar_data_processamento(id_relatorio, file_path.name)
 
@@ -59,3 +59,5 @@ def preparar_e_enviar_diagrama_async(estados: str, ano_inicio: str, ano_fim: str
     with file_path.open('rb') as f:
         send_email(
             email, f'Diagrama de distribuição do local de falecimento para {", ".join(estados)}, {_formatar_intervalo(ano_inicio, ano_fim)}', 'relatorio.pdf', f.read())
+
+    return True

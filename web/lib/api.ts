@@ -13,12 +13,16 @@ export type ReportType = {
 };
 
 export type ProcessedReport = {
+  criado_em?: string | null;
   data_fim: string;
   data_inicio: string;
   data_processamento: string | null;
   estado: string;
+  id_requisicao: string | null;
+  mensagem: string | null;
+  status: "failed" | "queued" | "running" | "succeeded";
   tipo: string;
-  uri: string;
+  uri?: string;
 };
 
 type ReportRequest = {

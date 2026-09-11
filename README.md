@@ -38,6 +38,17 @@ Comandos operacionais:
 `docker compose down` preserva os volumes de relatórios, Redis e população. Não use a
 opção `--volumes` se quiser manter esses dados.
 
+Como alternativa ao Compose, o flake Nix em `flake.nix` fornece um ambiente reprodutível
+com Python, R, Pandoc e LaTeX (assumindo Redis local):
+
+    nix develop            # shells interativos com todas as ferramentas
+    nix run .              # inicia o Hypercorn com a API
+    ENCELADUS_BIND=0.0.0.0:8000 nix run .   # ajusta o endereço do Hypercorn
+
+A API espera `REDIS_HOST`/`REDIS_PORT`/`REDIS_DB` configuráveis; fora do Compose, o
+padrão é `localhost:6379`, banco 0. O Compose continua definindo `REDIS_HOST: redis`
+explicitamente.
+
 ## População municipal do IBGE
 
 Antes de iniciar a API, o serviço `population-data` consulta a estimativa municipal mais

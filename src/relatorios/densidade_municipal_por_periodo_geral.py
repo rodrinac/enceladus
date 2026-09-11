@@ -55,7 +55,7 @@ def preparar_e_enviar_relatorio_async(estados: list, data_inicio: str, data_fim:
                 'Falha ao gerar relatório %s (requisição %s): %s',
                 id_relatorio, id_requisicao, streamdata,
             )
-            return
+            return False
         
         storage.salvar_data_processamento(id_relatorio, file_path.name)
 
@@ -68,3 +68,5 @@ def preparar_e_enviar_relatorio_async(estados: list, data_inicio: str, data_fim:
     with file_path.open('rb') as f:
         send_email(
             email, f'Relatório de densidade municipal por período - {", ".join(estados)}, {_formatar_intervalo(data_inicio, data_fim)}', 'relatorio_densidade_municipal.pdf', f.read())
+
+    return True
