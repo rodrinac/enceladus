@@ -71,6 +71,28 @@ The host health-checks Quart locally before the API Gateway/Lambda proxy exposes
 failure the previous build is restored (the earlier `current-*.previous` out-links) and
 the script exits unsuccessfully. Application data remains on the retained EBS volume.
 
+## Migrate an existing Docker-era host
+
+If the stack was created before this repo dropped Docker, the instance still runs the
+legacy Compose user data and the first `Deploy API to EC2` run fails fast because
+`/etc/enceladus/runtime.env` does not exist. Keep the same instance and migrate it in
+place: run `deploy/bootstrap.sh` on the host once through Systems Manager. It adopts the
+values CloudFormation originally injected (`/opt/enceladus/runtime.env`), mounts the data
+volume, installs Nix, stops and disables the legacy Docker stack (moving any old PDFs from
+`/srv/enceladus/reports` into `/srv/enceladus/relatorios`), writes the systemd units and
+performs the initial Nix deploy:
+
+    aws ssm send-command \
+      --region eu-west-1 \
+      --document-name AWS-RunShellScript \
+      --instance-ids i-xxxxxxxx \
+      --parameters 'commands=["sudo curl --fail --location --retry 5 https://raw.githubusercontent.com/rodrinac/enceladus/main/deploy/bootstrap.sh --output /opt/enceladus/deploy/bootstrap.sh && sudo bash /opt/enceladus/deploy/bootstrap.sh"]' \
+      --query Command.CommandId --output text
+
+Watch it with `aws ssm get-command-invocation --command-id <id> --instance-id i-xxxxxxxx`.
+A fresh stack created from the current template does not need this step: its user data
+runs the same bootstrap automatically.
+
 ## Recovery
 
 Open a Session Manager shell without exposing SSH:

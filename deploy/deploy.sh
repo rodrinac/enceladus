@@ -3,6 +3,9 @@
 # host. Refreshes the repository checkout, rebuilds the API and population
 # out-links, feeds the runtime environment (including the Redis password) to
 # the systemd units and health-checks Quart before promoting the release.
+#
+# Emits GitHub Actions workflow commands so the phases render as collapsible
+# groups and failures appear prominently in the Deploy API to EC2 job log.
 set -Eeuo pipefail
 
 ref=${1:-${SOURCE_REF:-main}}
@@ -12,24 +15,29 @@ env_file=/etc/enceladus/runtime.env
 
 export PATH="/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
 
+echo "::group::Prepare release"
+echo "Deploying Enceladus reference: $ref"
+if [[ ! -f $env_file ]]; then
+  echo "::error file=deploy/deploy.sh::Missing $env_file so this host was never bootstrapped with Nix. Run: sudo bash /opt/enceladus/deploy/bootstrap.sh" >&2
+  exit 2
+fi
+if ! command -v nix >/dev/null 2>&1; then
+  echo "::error file=deploy/deploy.sh::Nix is not installed. Run: sudo bash /opt/enceladus/deploy/bootstrap.sh" >&2
+  exit 2
+fi
 set -a
 # shellcheck disable=SC1090
 source "$env_file"
 set +a
+echo "::endgroup::"
 
-# Redis must exist before the app starts; first bootstrap builds it.
-if [[ ! -x $repo/current-redis/bin/redis-server ]]; then
-  nix build "$repo#redis" --out-link "$repo/current-redis"
-fi
-if ! systemctl is-active --quiet enceladus-redis.service; then
-  systemctl restart enceladus-redis.service
-fi
-
-# Bring the checkout up to the requested ref (deploy.sh is fetched from raw
-# GitHub before this runs, so a newer script self-updates the code).
+echo "::group::Sync repository"
 git -C "$repo" fetch --quiet --depth 1 origin "$ref"
 git -C "$repo" checkout --quiet --force --detach FETCH_HEAD
+git -C "$repo" log -1 --oneline
+echo "::endgroup::"
 
+echo "::group::Secrets and runtime environment"
 previous_password=""
 if [[ -f $env_file ]]; then
   previous_password=$(sed -n 's/^REDIS_PASSWORD=//p' "$env_file" | tail -1)
@@ -58,14 +66,26 @@ REDIS_PASSWORD=$redis_password
 SES_CONFIGURATION_SET=$SES_CONFIGURATION_SET
 SES_SENDER=$SES_SENDER
 EOF
+echo "Redis password refreshed from Secrets Manager"
+echo "::endgroup::"
 
+echo "::group::Build releases"
+# Redis must exist before the app starts; the first bootstrap builds it.
+if [[ ! -x $repo/current-redis/bin/redis-server ]]; then
+  nix build "$repo#redis" --out-link "$repo/current-redis"
+fi
 if [[ -n $previous_password && $previous_password != "$redis_password" ]]; then
+  echo "::warning::Redis password rotated; restarting enceladus-redis"
   systemctl restart enceladus-redis.service
+elif ! systemctl is-active --quiet enceladus-redis.service; then
+  systemctl start enceladus-redis.service
 fi
 
 nix build "$repo#api" --out-link "$repo/current-api.next"
 nix build "$repo#population" --out-link "$repo/current-population.next"
+echo "::endgroup::"
 
+echo "::group::Restart services"
 rm -rf "$repo/current-api.previous" "$repo/current-population.previous"
 if [[ -e $repo/current-api ]]; then
   mv "$repo/current-api" "$repo/current-api.previous"
@@ -78,7 +98,9 @@ mv "$repo/current-population.next" "$repo/current-population"
 
 systemctl restart enceladus-population.service
 systemctl restart enceladus-api.service
+echo "::endgroup::"
 
+echo "::group::Health check"
 if ! curl --fail --retry 30 --retry-delay 5 --retry-connrefused \
   http://127.0.0.1:8000/health; then
   rm -f "$repo/current-api"
@@ -91,10 +113,15 @@ if ! curl --fail --retry 30 --retry-delay 5 --retry-connrefused \
   fi
   systemctl restart enceladus-population.service
   systemctl restart enceladus-api.service
-  echo "Deployment failed health checks; previous release restored" >&2
+  echo "::endgroup::"
+  echo "::error file=deploy/deploy.sh::Deployment failed health checks; previous release restored"
   exit 1
 fi
+echo "::endgroup::"
 
+echo "::group::Clean up"
 nix-collect-garbage --quiet || true
 rm -rf "$repo/current-api.previous" "$repo/current-population.previous"
+echo "::endgroup::"
+
 echo "Deployment healthy: $ref"

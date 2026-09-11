@@ -1,19 +1,52 @@
 #!/usr/bin/env bash
 # One-time EC2 bootstrap: installs Nix, mounts the data volume, configures the
 # systemd units and performs the initial deploy. Runs from cloud-init user-data
-# after the repository has been cloned to /opt/enceladus.
+# after the repository has been cloned to /opt/enceladus, and is safe to re-run
+# manually on an existing (Docker-era) host to migrate it to the Nix runtime.
+#
+# Emits GitHub Actions workflow commands so progress groups render in job logs.
 set -Eeuo pipefail
 
 repo=/opt/enceladus
 env_file=/etc/enceladus/runtime.env
 
+echo "::group::Runtime environment"
+mkdir --parents /etc/enceladus
+if [[ ! -f $env_file ]]; then
+  echo "Missing $env_file; synthesizing it (adopting legacy values when present)"
+  legacy_env=/opt/enceladus/runtime.env
+  if [[ -f $legacy_env ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$legacy_env"
+    set +a
+  fi
+  umask 077
+  cat > "$env_file" <<EOF
+CORS_ORIGINS=${CORS_ORIGINS:?CORS_ORIGINS must be set in legacy runtime.env}
+ENCELADUS_DATASUS_CACHE_MAX_BYTES=${ENCELADUS_DATASUS_CACHE_MAX_BYTES:-5368709120}
+ENCELADUS_DATASUS_CACHE_PATH=${ENCELADUS_DATASUS_CACHE_PATH:-/srv/enceladus/relatorios/.cache/datasus}
+ENCELADUS_DATASUS_MAX_YEAR_PATH=${ENCELADUS_DATASUS_MAX_YEAR_PATH:-/srv/enceladus/population/datasus-max-year.txt}
+ENCELADUS_HOME=${ENCELADUS_HOME:-/srv/enceladus}
+ENCELADUS_POPULATION_DATA_PATH=${ENCELADUS_POPULATION_DATA_PATH:-/srv/enceladus/population/population.csv}
+IBGE_POPULATION_PERIOD=${IBGE_POPULATION_PERIOD:-last%201}
+REDIS_HOST=${REDIS_HOST:-127.0.0.1}
+REDIS_SECRET_ARN=${REDIS_SECRET_ARN:?REDIS_SECRET_ARN must be set in legacy runtime.env}
+SES_CONFIGURATION_SET=${SES_CONFIGURATION_SET:-}
+SES_SENDER=${SES_SENDER:?SES_SENDER must be set in legacy runtime.env}
+SOURCE_REF=${SOURCE_REF:-main}
+SOURCE_REPOSITORY=${SOURCE_REPOSITORY:-rodrinac/enceladus}
+EOF
+fi
 set -a
 # shellcheck disable=SC1090
 source "$env_file"
 set +a
+echo "::endgroup::"
 
 export PATH="/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
 
+echo "::group::Mount data volume"
 # Mount the retained EBS data volume under /srv/enceladus (idempotent).
 device=""
 for _ in $(seq 1 60); do
@@ -36,14 +69,38 @@ mkdir --parents /srv/enceladus
 findmnt /srv/enceladus >/dev/null 2>&1 || mount /srv/enceladus
 mkdir --parents /srv/enceladus/population /srv/enceladus/redis
 chmod 0777 /srv/enceladus/population /srv/enceladus/redis
+echo "Data volume mounted at /srv/enceladus"
+echo "::endgroup::"
 
+echo "::group::Install Nix"
 # Install Nix with a systemd-managed daemon (multi-user).
 if [[ ! -x /nix/var/nix/profiles/default/bin/nix ]]; then
   curl --fail --location --retry 5 https://nixos.org/nix/install --output /tmp/nix-install
   bash /tmp/nix-install --daemon
+  export PATH="/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
 fi
-export PATH="/nix/var/nix/profiles/default/bin:/root/.nix-profile/bin:$PATH"
+nix --version
+echo "::endgroup::"
 
+# Migrating an existing Docker-era host: stop the legacy Compose stack so it
+# never competes with systemd for port 8000 or the data volume.
+if command -v docker >/dev/null 2>&1; then
+  echo "::group::Stop legacy Docker services"
+  (cd "$repo" || exit 1; docker compose down --timeout 30 || true)
+  systemctl disable --now docker.service containerd.service 2>/dev/null || true
+  echo "Legacy Compose stack stopped and disabled"
+
+  # Old Stack served PDFs from /srv/enceladus/reports; the Nix runtime reads
+  # $ENCELADUS_HOME/relatorios (default /srv/enceladus/relatorios). Preserve
+  # the existing reports so history keeps listing after the migration.
+  if [[ -d /srv/enceladus/reports && ! -e /srv/enceladus/relatorios ]]; then
+    mv /srv/enceladus/reports /srv/enceladus/relatorios
+    echo "Moved legacy reports to /srv/enceladus/relatorios"
+  fi
+  echo "::endgroup::"
+fi
+
+echo "::group::Provision systemd units"
 # Build Redis once so the systemd unit has a binary to exec.
 if [[ ! -x $repo/current-redis/bin/redis-server ]]; then
   nix build "$repo#redis" --out-link "$repo/current-redis"
@@ -107,6 +164,10 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable enceladus-redis.service enceladus-population.service enceladus-api.service
+echo "Units written and enabled"
+echo "::endgroup::"
 
+echo "::group::Initial deploy"
 # Build the app and populate data, then start every service.
 bash "$repo/deploy/deploy.sh" "$SOURCE_REF"
+echo "::endgroup::"
