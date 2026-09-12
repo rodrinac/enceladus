@@ -35,6 +35,10 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(value));
 }
 
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "medium" }).format(new Date(value));
+}
+
 export default function Home() {
   const [configuration, setConfiguration] = useState<Configuration | null>(null);
   const [configurationError, setConfigurationError] = useState<string | null>(null);
@@ -292,8 +296,8 @@ export default function Home() {
                       </p>
                       <p className="mt-2 text-xs font-bold uppercase tracking-wide text-latte-overlay1">
                         {report.status === "succeeded"
-                          ? `Processado em ${report.data_processamento ?? "data indisponível"}`
-                          : `Solicitado em ${formatDate(report.criado_em ?? "")}`}
+                          ? `Processado em ${report.data_processamento ? formatDateTime(report.data_processamento) : "data indisponível"}`
+                          : `Solicitado em ${report.criado_em ? formatDateTime(report.criado_em) : ""}`}
                       </p>
                       {report.mensagem && <p className="mt-2 text-sm text-latte-red">{report.mensagem}</p>}
                     </div>

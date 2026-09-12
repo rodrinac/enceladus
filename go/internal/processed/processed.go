@@ -16,7 +16,7 @@ import (
 
 var (
 	redisDateFormat     = "02/01/2006 15:04:05"
-	processedDateFormat = "02/01/2006 15:04:05-07:00"
+	processedDateFormat = "2006-01-02T15:04:05-07:00"
 	isoOnlyFormat       = "2006-01-02T15:04:05"
 	fullISOPassiveDate  = "2006-01-02T15:04:05Z07:00"
 )

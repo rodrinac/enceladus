@@ -67,7 +67,7 @@ test("submits dates after 2019 and preserves multiple/single state selection", a
 test("renders processed reports and keeps the Latte palette on mobile", async ({ page }) => {
   await page.route("**/relatorios/processados", (route) => route.fulfill({ json: [{
     tipo: "Densidade geral", estado: "DF", data_inicio: "2024-01-01", data_fim: "2024-12-31",
-    data_processamento: "10/09/2026 12:00:00+00:00", id_requisicao: null, mensagem: null,
+    data_processamento: "2026-09-10T12:00:00+00:00", id_requisicao: null, mensagem: null,
     status: "succeeded", uri: "/relatorios/example.pdf",
   }, {
     tipo: "Casos mensais", estado: "MG", data_inicio: "2024", data_fim: "2024",

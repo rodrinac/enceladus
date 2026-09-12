@@ -93,7 +93,7 @@ func TestList(t *testing.T) {
 	if pdfEntry["uri"] != "/relatorios/queimaduras/densidade-municipal-por-periodo-geral/CE.2020.2022.pdf" {
 		t.Fatalf("unexpected uri: %+v", pdfEntry)
 	}
-	if pdfEntry["data_processamento"] != "10/10/2024 12:00:01+00:00" {
+	if pdfEntry["data_processamento"] != "2024-10-10T12:00:01+00:00" {
 		t.Fatalf("unexpected processing date: %+v", pdfEntry)
 	}
 }
