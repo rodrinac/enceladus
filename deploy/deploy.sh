@@ -32,6 +32,22 @@ source "$env_file"
 set +a
 echo "::endgroup::"
 
+# Reference the live release out-links from the Nix GC roots directory so the
+# nix-collect-garbage step below can never delete the closures of the running
+# releases (deleting them leaves dangling current-* symlinks and every later
+# restart fails with exit status 127).
+pin_current_release() {
+  local gcroots=/nix/var/nix/gcroots/enceladus
+  mkdir -p "$gcroots"
+  local unit
+  for unit in api population redis; do
+    local link=$repo/current-$unit
+    if [[ -e $link ]]; then
+      ln -sfn "$(readlink -f "$link")" "$gcroots/$unit"
+    fi
+  done
+}
+
 echo "::group::Sync repository"
 git -C "$repo" fetch --quiet --depth 1 origin "$ref"
 git -C "$repo" checkout --quiet --force --detach FETCH_HEAD
@@ -53,6 +69,7 @@ redis_password=$(aws secretsmanager get-secret-value \
 umask 077
 cat > "$env_file" <<EOF
 APP_REF=$ref
+HOME=${HOME:-/root}
 AWS_DEFAULT_REGION=$region
 AWS_REGION=$region
 CORS_ORIGINS=$CORS_ORIGINS
@@ -100,6 +117,8 @@ if [[ -e $repo/current-population ]]; then
 fi
 mv "$repo/current-population.next" "$repo/current-population"
 
+pin_current_release
+
 systemctl restart enceladus-population.service
 systemctl restart enceladus-api.service
 echo "::endgroup::"
@@ -117,6 +136,7 @@ if ! curl --fail --retry 30 --retry-delay 5 --retry-connrefused \
   fi
   systemctl restart enceladus-population.service
   systemctl restart enceladus-api.service
+  pin_current_release
   echo "::endgroup::"
   echo "::error file=deploy/deploy.sh::Deployment failed health checks; previous release restored"
   exit 1
