@@ -28,6 +28,7 @@ func List(cfg *config.Config, reportsDir string, dataStore store.DataStore, regi
 		return nil, err
 	}
 
+	produced := map[string]bool{}
 	relatorios := []map[string]interface{}{}
 	for _, report := range cfg.Relatorios {
 		subdir := strings.TrimPrefix(strings.TrimPrefix(report.Path, "/"), "relatorios/")
@@ -46,10 +47,11 @@ func List(cfg *config.Config, reportsDir string, dataStore store.DataStore, regi
 			redisKey := fmt.Sprintf("dataProcessamento.%s.%s", report.ID, nomeBase)
 			valor := dates[redisKey]
 			processadoEm := withOffset(valor)
+			estado := estadoDisplay(partes[0])
 
 			relatorios = append(relatorios, map[string]interface{}{
 				"tipo":               report.Nome,
-				"estado":             partes[0],
+				"estado":             estado,
 				"data_inicio":        partes[1],
 				"data_fim":           partes[2],
 				"uri":                report.Path + "/" + nomeBase,
@@ -59,10 +61,14 @@ func List(cfg *config.Config, reportsDir string, dataStore store.DataStore, regi
 				"status":             "succeeded",
 				"criado_em":          nullable(processadoEm),
 			})
+			produced[reportKey(report.Nome, estado, partes[1], partes[2])] = true
 		}
 	}
 
 	for _, job := range registry.List() {
+		if produced[reportKey(job.Tipo, estadoDisplay(job.Estado), job.DataInicio, job.DataFim)] {
+			continue
+		}
 		relatorios = append(relatorios, map[string]interface{}{
 			"criado_em":     job.CriadoEm,
 			"data_fim":      job.DataFim,
@@ -86,6 +92,18 @@ func nullable(value string) interface{} {
 		return nil
 	}
 	return value
+}
+
+// estadoDisplay renders a PDF filename state segment ("DF-SP") with the same
+// separator shown for live jobs ("DF · SP").
+func estadoDisplay(value string) string {
+	return strings.Join(strings.Split(value, "-"), " · ")
+}
+
+// reportKey identifies a report by type, states, and date range, so that a
+// still-registered job does not shadow its already-generated PDF.
+func reportKey(tipo, estado, dataInicio, dataFim string) string {
+	return strings.Join([]string{tipo, estado, dataInicio, dataFim}, "|")
 }
 
 // withOffset normalizes a stored processing timestamp to include the UTC

@@ -287,7 +287,10 @@ export default function Home() {
           ) : (
             <div className="space-y-3">
               {reports.map((report) => (
-                <Card className="rounded-2xl border-latte-surface1 bg-latte-base/70 p-5 shadow-sm" key={`${report.uri}-${report.data_processamento}`}>
+                <Card
+                  className="rounded-2xl border-latte-surface1 bg-latte-base/70 p-5 shadow-sm"
+                  key={report.id_requisicao ?? report.uri ?? `${report.tipo}-${report.data_processamento}`}
+                >
                   <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
                     <div>
                       <h3 className="font-extrabold">{report.tipo}</h3>

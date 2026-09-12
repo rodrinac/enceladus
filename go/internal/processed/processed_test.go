@@ -139,3 +139,60 @@ func TestParseDate(t *testing.T) {
 		t.Fatal("empty date should be zero time")
 	}
 }
+
+func TestListDedupesJobOncePDFExists(t *testing.T) {
+	reportsDir := t.TempDir()
+	folder := filepath.Join(reportsDir, "queimaduras", "densidade-municipal-por-periodo-geral")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "DF-SP.2023.2024.pdf"), []byte("%PDF"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeStore{dates: map[string]string{
+		"dataProcessamento.DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL.DF-SP.2023.2024.pdf": "10/10/2024 12:00:01",
+	}}
+	registry := jobstatus.NewRegistry()
+	registry.Register("req-dupe", "Densidade municipal por período", []string{"DF", "SP"}, "2023", "2024")
+	registry.MarkFailed("req-dupe")
+
+	items, err := List(testConfig(), reportsDir, store, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected single deduped item, got %d: %+v", len(items), items)
+	}
+	if items[0]["status"] != "succeeded" {
+		t.Fatalf("expected succeeded item, got %+v", items[0])
+	}
+	if items[0]["estado"] != "DF · SP" {
+		t.Fatalf("expected estado to use middle dot separator, got %+v", items[0]["estado"])
+	}
+}
+
+func TestListKeepsJobWhenPDFMissing(t *testing.T) {
+	reportsDir := t.TempDir()
+	folder := filepath.Join(reportsDir, "queimaduras", "densidade-municipal-por-periodo-geral")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeStore{dates: map[string]string{}}
+	registry := jobstatus.NewRegistry()
+	registry.Register("req-live", "Densidade municipal por período", []string{"DF", "SP"}, "2023", "2024")
+	registry.MarkRunning("req-live")
+
+	items, err := List(testConfig(), reportsDir, store, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 live item, got %d", len(items))
+	}
+	if items[0]["status"] != "running" {
+		t.Fatalf("expected running item, got %+v", items[0])
+	}
+	if items[0]["estado"] != "DF · SP" {
+		t.Fatalf("expected estado with middle dot, got %+v", items[0]["estado"])
+	}
+}
