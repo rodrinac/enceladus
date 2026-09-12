@@ -32,32 +32,47 @@
               dplyr ggplot2 gridExtra janitor kableExtra matrixStats readr rmarkdown tidyr microdatasus
             ];
           };
-          python = pkgs.python312.withPackages (ps: [
-            ps.boto3 ps.hypercorn ps."quart-cors" ps.quart ps.pyyaml ps.redis
-          ]);
           latex = pkgs.texliveFull;
+          go = pkgs.buildGoModule {
+            pname = "enceladus-go";
+            version = "0.0.0";
+            src = pkgs.lib.cleanSourceWith {
+              src = ./go;
+              name = "enceladus-go-src";
+            };
+            vendorHash = "sha256-yvTFVjhJH5Hu6y/GfB+TypNjae/tmXoPCARbpwJOyy0=";
+            subPackages = [
+              "./cmd/enceladus-api"
+              "./cmd/fetch-sim-archives"
+              "./cmd/fetch-population"
+            ];
+            ldflags = [ "-s" "-w" ];
+          };
           api = pkgs.writeShellApplication {
             name = "enceladus-api";
-            runtimeInputs = [ latex pkgs.pandoc python r ];
+            runtimeInputs = [ latex pkgs.pandoc r go ];
             text = ''
-              export PYTHONPATH=${self}/src''${PYTHONPATH:+:$PYTHONPATH}
               export HOME="''${HOME:-/root}"
+              export ENCELADUS_SOURCE_ROOT="''${ENCELADUS_SOURCE_ROOT:-${self}/src}"
               export ENCELADUS_HOME="''${ENCELADUS_HOME:-$PWD/.enceladus}"
+              export ENCELADUS_FETCH_SIM_BIN="''${ENCELADUS_FETCH_SIM_BIN:-enceladus-fetch-sim-archives}"
               mkdir -p "$ENCELADUS_HOME"
-              exec hypercorn --bind "''${ENCELADUS_BIND:-0.0.0.0:8000}" main:app
+              exec enceladus-api
             '';
           };
           population = pkgs.writeShellApplication {
             name = "enceladus-population";
-            runtimeInputs = [ python ];
+            runtimeInputs = [ go ];
             text = ''
               export HOME="''${HOME:-/root}"
               export ENCELADUS_HOME="''${ENCELADUS_HOME:-$PWD/.enceladus}"
-              mkdir -p "$ENCELADUS_HOME"
-              exec python ${self}/scripts/fetch_population.py
+              export ENCELADUS_POPULATION_DATA_PATH="''${ENCELADUS_POPULATION_DATA_PATH:-$ENCELADUS_HOME/data/population.csv}"
+              export ENCELADUS_DATASUS_MAX_YEAR_PATH="''${ENCELADUS_DATASUS_MAX_YEAR_PATH:-$ENCELADUS_HOME/data/datasus-max-year.txt}"
+              mkdir -p "$ENCELADUS_HOME/data"
+              exec enceladus-fetch-population
             '';
           };
-        in { inherit api latex pkgs population python r; };
+        in { inherit api go latex pkgs population r; };
     in {
       apps = forAllSystems (system:
         let env = forSystem system;
@@ -76,6 +91,7 @@
         in {
           default = env.api;
           api = env.api;
+          go = env.go;
           population = env.population;
           redis = env.pkgs.redis;
         });
@@ -83,12 +99,13 @@
         let env = forSystem system;
         in {
           default = env.pkgs.mkShell {
-            packages = [ env.latex env.pkgs.pandoc env.python env.r ]
+            packages = [ env.latex env.pkgs.pandoc env.go env.r ]
               ++ env.pkgs.lib.optional (!env.pkgs.stdenv.isDarwin) env.pkgs.redis;
             shellHook = ''
               export LANG=en_US.UTF-8
               unset LC_COLLATE
-              export PYTHONPATH="$PWD/src''${PYTHONPATH:+:$PYTHONPATH}"
+              export ENCELADUS_SOURCE_ROOT="$PWD/src"
+              export ENCELADUS_FETCH_SIM_BIN="enceladus-fetch-sim-archives"
               export ENCELADUS_HOME="''${ENCELADUS_HOME:-$PWD/.enceladus}"
               mkdir -p "$ENCELADUS_HOME"
             '';

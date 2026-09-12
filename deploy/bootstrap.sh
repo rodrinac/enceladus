@@ -200,7 +200,7 @@ UNIT
 
 cat >/etc/systemd/system/enceladus-api.service <<'UNIT'
 [Unit]
-Description=Enceladus Quart API
+Description=Enceladus API
 After=network-online.target enceladus-redis.service
 Wants=network-online.target enceladus-redis.service
 

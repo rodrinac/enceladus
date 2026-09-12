@@ -65,9 +65,9 @@ are ready. Later merges to `main` deploy automatically when API-related paths ch
 workflow invokes `deploy/deploy.sh` on the host through Systems Manager; the script
 refreshes the `/opt/enceladus` checkout, rebuilds the flake outputs, feeds the runtime
 environment (including the Redis password from Secrets Manager) to the systemd units and
-health-checks Quart before promoting the release.
+health-checks the API before promoting the release.
 
-The host health-checks Quart locally before the API Gateway/Lambda proxy exposes it. On
+The host health-checks the API locally before the API Gateway/Lambda proxy exposes it. On
 failure the previous build is restored (the earlier `current-*.previous` out-links) and
 the script exits unsuccessfully. Application data remains on the retained EBS volume.
 

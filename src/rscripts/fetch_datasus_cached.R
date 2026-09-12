@@ -26,10 +26,13 @@ fetch_open_datasus <- function(
   output_file <- tempfile(pattern = "open-datasus-", fileext = ".csv")
   on.exit(unlink(output_file), add = TRUE)
   states <- paste(as.character(uf), collapse = ",")
+  fetch_sim_bin <- Sys.getenv(
+    "ENCELADUS_FETCH_SIM_BIN",
+    "enceladus-fetch-sim-archives"
+  )
   status <- system2(
-    "python",
+    fetch_sim_bin,
     c(
-      "scripts/fetch_sim_archives.py",
       "--year-start", as.character(year_start),
       "--year-end", as.character(year_end),
       "--states", states,
