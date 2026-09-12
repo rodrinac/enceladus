@@ -47,6 +47,10 @@
               "./cmd/fetch-population"
             ];
             ldflags = [ "-s" "-w" ];
+            postInstall = ''
+              mv "$out/bin/fetch-population" "$out/bin/enceladus-fetch-population"
+              mv "$out/bin/fetch-sim-archives" "$out/bin/enceladus-fetch-sim-archives"
+            '';
           };
           api = pkgs.writeShellApplication {
             name = "enceladus-api";
