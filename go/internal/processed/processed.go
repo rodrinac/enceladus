@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	redisDateFormat    = "02/01/2006 15:04:05"
-	isoOnlyFormat      = "2006-01-02T15:04:05"
-	fullISOPassiveDate = "2006-01-02T15:04:05Z07:00"
+	redisDateFormat     = "02/01/2006 15:04:05"
+	processedDateFormat = "02/01/2006 15:04:05-07:00"
+	isoOnlyFormat       = "2006-01-02T15:04:05"
+	fullISOPassiveDate  = "2006-01-02T15:04:05Z07:00"
 )
 
 // List assembles processed PDFs plus live jobs, sorted newest first.
@@ -44,6 +45,7 @@ func List(cfg *config.Config, reportsDir string, dataStore store.DataStore, regi
 			}
 			redisKey := fmt.Sprintf("dataProcessamento.%s.%s", report.ID, nomeBase)
 			valor := dates[redisKey]
+			processadoEm := withOffset(valor)
 
 			relatorios = append(relatorios, map[string]interface{}{
 				"tipo":               report.Nome,
@@ -51,11 +53,11 @@ func List(cfg *config.Config, reportsDir string, dataStore store.DataStore, regi
 				"data_inicio":        partes[1],
 				"data_fim":           partes[2],
 				"uri":                report.Path + "/" + nomeBase,
-				"data_processamento": nullable(valor),
+				"data_processamento": nullable(processadoEm),
 				"id_requisicao":      nil,
 				"mensagem":           nil,
 				"status":             "succeeded",
-				"criado_em":          nullable(valor),
+				"criado_em":          nullable(processadoEm),
 			})
 		}
 	}
@@ -86,23 +88,28 @@ func nullable(value string) interface{} {
 	return value
 }
 
+// withOffset normalizes a stored processing timestamp to include the UTC
+// offset, so clients do not have to guess the timezone of naive values.
+func withOffset(value string) string {
+	if parsed := parseDateTime(value); !parsed.IsZero() {
+		return parsed.Format(processedDateFormat)
+	}
+	return value
+}
+
 // parseDate mirrors _ordenar_por_data: ISO first, then %d/%m/%Y %H:%M:%S.
 func parseDate(entry map[string]interface{}) time.Time {
-	value := firstString(entry, "criado_em", "data_processamento")
+	return parseDateTime(firstString(entry, "criado_em", "data_processamento"))
+}
+
+func parseDateTime(value string) time.Time {
 	if value == "" {
 		return time.Time{}
 	}
-	if parsed, err := time.Parse(isoOnlyFormat, value); err == nil {
-		return parsed
-	}
-	if parsed, err := time.Parse(fullISOPassiveDate, value); err == nil {
-		return parsed
-	}
-	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
-		return parsed
-	}
-	if parsed, err := time.Parse(redisDateFormat, value); err == nil {
-		return parsed
+	for _, layout := range []string{processedDateFormat, isoOnlyFormat, fullISOPassiveDate, time.RFC3339, redisDateFormat} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed
+		}
 	}
 	return time.Time{}
 }

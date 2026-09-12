@@ -13,7 +13,7 @@ func TestFromEnvironmentDefaults(t *testing.T) {
 	if st.SESSender != "Enceladus Big Data <enceladus.bigdata@hotmail.com>" {
 		t.Fatalf("unexpected default sender: %q", st.SESSender)
 	}
-	if st.SESConfigurationSet != "Default" {
+	if st.SESConfigurationSet != "" {
 		t.Fatalf("unexpected default configuration set: %q", st.SESConfigurationSet)
 	}
 	if st.SESRegion != "eu-west-1" {

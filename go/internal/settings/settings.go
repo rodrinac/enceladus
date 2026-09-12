@@ -86,7 +86,7 @@ func FromEnvironment() Settings {
 		RedisHost:            os.Getenv("REDIS_HOST"),
 		RedisPassword:        os.Getenv("REDIS_PASSWORD"),
 		RedisPort:            getenvInt("REDIS_PORT", 6379),
-		SESConfigurationSet:  envOr("SES_CONFIGURATION_SET", "Default"),
+		SESConfigurationSet:  envOrEmpty("SES_CONFIGURATION_SET", "Default"),
 		SESRegion:            envOr("AWS_DEFAULT_REGION", defaultRegion),
 		SESSender:            envOr("SES_SENDER", defaultSESSender),
 		Bind:                 os.Getenv("ENCELADUS_BIND"),
@@ -104,6 +104,15 @@ func (s Settings) WithCORS() Settings {
 
 func envOr(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+// envOrEmpty mirrors Python's os.getenv(name, fallback) or None: a variable
+// that is present but empty yields "" instead of the fallback.
+func envOrEmpty(name, fallback string) string {
+	if value, ok := os.LookupEnv(name); ok {
 		return value
 	}
 	return fallback

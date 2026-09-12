@@ -37,7 +37,7 @@ func NewRegistry() *Registry {
 }
 
 func nowIsoSeconds() string {
-	return time.Now().Format("2006-01-02T15:04:05")
+	return time.Now().UTC().Format("2006-01-02T15:04:05-07:00")
 }
 
 func (r *Registry) Register(requestID, reportType string, states []string, startDate, endDate string) {
