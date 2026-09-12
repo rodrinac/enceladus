@@ -3,13 +3,17 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rodrinac/enceladus/go/internal/config"
@@ -24,6 +28,11 @@ const (
 	reportTypeGeral   = "DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL"
 	reportTypeDensity = "DENSIDADE_MUNICIPAL_POR_PERIODO"
 	reportTypeCasos   = "CASOS_MENSAIS_POR_MUNICIPIO_POR_ESTADO"
+)
+
+var (
+	anoRegex = regexp.MustCompile(`^\d{4}$`)
+	dataRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 )
 
 type Server struct {
@@ -105,7 +114,90 @@ func (s *Server) reportName(reportID string) string {
 	return report.Nome
 }
 
+// validateSubmission rejects submissions whose states or interval would escape
+// the configured universe: the same values feed file paths and R argv, so they
+// are constrained to known states, well-formed dates/years, available years and
+// (for monthly-column reports) a single calendar year.
+func (s *Server) validateSubmission(reportID string, states []string, start, end string) error {
+	report, err := s.Cfg.RelatorioByID(reportID)
+	if err != nil {
+		return errors.New("tipo de relatório desconhecido")
+	}
+
+	normalized := make([]string, 0, len(states))
+	for _, estado := range states {
+		if strings.TrimSpace(estado) != "" {
+			normalized = append(normalized, estado)
+		}
+	}
+	if len(normalized) == 0 {
+		return errors.New("informe pelo menos um estado")
+	}
+	allowed := s.Cfg.AllStateCodes()
+	for _, estado := range normalized {
+		if estado != "TODOS" && !containsValue(allowed, estado) {
+			return fmt.Errorf("estado desconhecido: %s", estado)
+		}
+	}
+
+	startYear, endYear := start, end
+	if report.UsesYears() {
+		if !anoRegex.MatchString(start) || !anoRegex.MatchString(end) {
+			return errors.New("ano_inicio e ano_fim devem ser anos válidos (AAAA)")
+		}
+		if start > end {
+			return errors.New("ano inicial depois do ano final")
+		}
+	} else {
+		startTime, errStart := time.Parse("2006-01-02", start)
+		endTime, errEnd := time.Parse("2006-01-02", end)
+		if errStart != nil || errEnd != nil {
+			return errors.New("data_inicio e data_fim devem estar no formato AAAA-MM-DD")
+		}
+		if startTime.After(endTime) {
+			return errors.New("data inicial depois da data final")
+		}
+		startYear, endYear = startTime.Format("2006"), endTime.Format("2006")
+	}
+
+	available := s.Cfg.AnosDisponiveis(s.Settings.DatasusMaxYearPath)
+	if len(available) == 0 {
+		return errors.New("nenhum ano disponível")
+	}
+	if !containsYear(available, startYear) || !containsYear(available, endYear) {
+		return fmt.Errorf("período fora do intervalo de anos disponíveis (de %d a %d)",
+			available[0], available[len(available)-1])
+	}
+
+	if report.ColunasMensais && startYear != endYear {
+		return errors.New("relatórios com colunas mensais aceitam no máximo um ano de período")
+	}
+	return nil
+}
+
+func containsValue(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func containsYear(years []int, value string) bool {
+	for _, year := range years {
+		if strconv.Itoa(year) == value {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) submit(w http.ResponseWriter, reportID string, states []string, start, end, email string) {
+	if err := s.validateSubmission(reportID, states, start, end); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"mensagem": err.Error()})
+		return
+	}
 	idReq := uuid.New().String()
 	s.Registry.Register(idReq, s.reportName(reportID), states, start, end)
 

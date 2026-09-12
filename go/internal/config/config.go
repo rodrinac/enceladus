@@ -26,6 +26,7 @@ type Relatorio struct {
 	Path             string   `yaml:"path" json:"path"`
 	MultiplosEstados bool     `yaml:"multiplos_estados" json:"multiplos_estados"`
 	CamposData       []string `yaml:"campos_data" json:"campos_data"`
+	ColunasMensais   bool     `yaml:"colunas_mensais" json:"colunas_mensais"`
 	Parametros       []string `yaml:"parametros" json:"parametros"`
 }
 
@@ -229,6 +230,17 @@ func (o CodigoObjects) MarshalJSON() ([]byte, error) {
 	}
 	buffer = append(buffer, '}')
 	return buffer, nil
+}
+
+// UsesYears reports whether the report is requested with year-only parameters
+// (ano_inicio/ano_fim) instead of full dates.
+func (r Relatorio) UsesYears() bool {
+	for _, parametro := range r.Parametros {
+		if parametro == "ano_inicio" {
+			return true
+		}
+	}
+	return false
 }
 
 // RelatorioByID returns the report definition for the given id, mirroring

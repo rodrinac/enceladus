@@ -23,6 +23,7 @@ relatorios:
     nome: Densidade municipal por período
     path: /relatorios/queimaduras/densidade-municipal-por-periodo
     multiplos_estados: false
+    colunas_mensais: true
     campos_data:
       - data_inicio
       - data_fim
@@ -53,6 +54,9 @@ func TestLoadPreservesOrder(t *testing.T) {
 	}
 	if len(cfg.Relatorios) != 1 || cfg.Relatorios[0].ID != "DENSIDADE_MUNICIPAL_POR_PERIODO" {
 		t.Fatalf("relatorios not parsed: %+v", cfg.Relatorios)
+	}
+	if !cfg.Relatorios[0].ColunasMensais {
+		t.Fatalf("colunas_mensais not parsed: %+v", cfg.Relatorios[0])
 	}
 }
 
@@ -121,5 +125,19 @@ func TestRelatorioByID(t *testing.T) {
 	}
 	if _, err := cfg.RelatorioByID("NOPE"); err == nil {
 		t.Fatal("expected error for unknown id")
+	}
+}
+
+func TestUsesYears(t *testing.T) {
+	cfg, err := Load(writeTestConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Relatorios[0].UsesYears() {
+		t.Fatal("date-parametrized report should not use years")
+	}
+	years := Relatorio{Parametros: []string{"estado", "ano_inicio", "ano_fim", "email"}}
+	if !years.UsesYears() {
+		t.Fatal("ano_inicio parametrized report should use years")
 	}
 }

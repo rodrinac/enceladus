@@ -16,6 +16,7 @@ import {
   getConfiguration,
   getProcessedReports,
   ProcessedReport,
+  reportDateGranularity,
   ReportType,
   requestReport,
   StateOption,
@@ -58,6 +59,10 @@ export default function Home() {
     [configuration, selectedReportId],
   );
 
+  const monthlyColumns = selectedReport?.colunas_mensais ?? false;
+  const granularity = selectedReport ? reportDateGranularity(selectedReport) : "day";
+  const inputLength = granularity === "month" ? 7 : 10;
+
   const refreshReports = useCallback(async (signal?: AbortSignal) => {
     try {
       setReports(await getProcessedReports(signal));
@@ -76,12 +81,14 @@ export default function Home() {
     getConfiguration()
       .then((loadedConfiguration) => {
         setConfiguration(loadedConfiguration);
-        setSelectedReportId(loadedConfiguration.reportTypes[0]?.id ?? "");
+        const initialReport = loadedConfiguration.reportTypes[0] ?? null;
+        setSelectedReportId(initialReport?.id ?? "");
         const capYear = loadedConfiguration.availableYears.at(-1);
         if (capYear) {
-          const startYear = loadedConfiguration.availableYears.includes(capYear - 1)
+          const twoYearStart = loadedConfiguration.availableYears.includes(capYear - 1)
             ? capYear - 1
             : loadedConfiguration.availableYears.at(0) ?? capYear;
+          const startYear = initialReport?.colunas_mensais ? capYear : twoYearStart;
           setStartDate(`${startYear}-01-01`);
           setEndDate(`${capYear}-12-31`);
         }
@@ -110,6 +117,40 @@ export default function Home() {
   const lastYear = configuration?.availableYears.at(-1);
   const minDate = firstYear ? `${firstYear}-01-01` : undefined;
   const maxDate = lastYear ? `${lastYear}-12-31` : undefined;
+
+  const startYear = startDate.slice(0, 4);
+  const endYear = endDate.slice(0, 4);
+  const startMinDate = monthlyColumns && endYear ? `${endYear}-01-01` : minDate;
+  const endMaxDate = monthlyColumns && startYear ? `${startYear}-12-31` : maxDate;
+
+  function handleStartDateChange(value: string) {
+    setStartDate(value);
+    if (monthlyColumns && value) {
+      const year = value.slice(0, 4);
+      setEndDate((current) => (current && current.slice(0, 4) !== year ? `${year}-12-31` : current));
+    }
+  }
+
+  function handleEndDateChange(value: string) {
+    setEndDate(value);
+    if (monthlyColumns && value) {
+      const year = value.slice(0, 4);
+      setStartDate((current) => (current && current.slice(0, 4) !== year ? `${year}-01-01` : current));
+    }
+  }
+
+  function handleYearChange(year: string) {
+    setStartDate(`${year}-01-01`);
+    setEndDate(`${year}-12-31`);
+  }
+
+  function onStartDateInput(value: string) {
+    handleStartDateChange(granularity === "month" && value ? `${value}-01` : value);
+  }
+
+  function onEndDateInput(value: string) {
+    handleEndDateChange(granularity === "month" && value ? `${value}-01` : value);
+  }
 
   function toggleState(state: string) {
     if (!selectedReport?.multiplos_estados) {
@@ -184,8 +225,13 @@ export default function Home() {
                   id="report-type"
                   className="h-11"
                   onChange={(event) => {
+                    const nextReportType = configuration.reportTypes.find(({ id }) => id === event.target.value);
                     setSelectedReportId(event.target.value);
                     setSelectedStates([]);
+                    if (nextReportType?.colunas_mensais && startYear !== endYear) {
+                      setStartDate(`${endYear}-01-01`);
+                      setEndDate(`${endYear}-12-31`);
+                    }
                   }}
                   value={selectedReportId}
                 >
@@ -241,14 +287,47 @@ export default function Home() {
                 </StateSelection>
               </fieldset>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Data inicial" id="start-date">
-                  <Input id="start-date" className="h-11" max={maxDate} min={minDate} onChange={(event) => setStartDate(event.target.value)} required type="date" value={startDate} />
+              {granularity === "year" ? (
+                <Field label="Ano" id="report-year">
+                  <NativeSelect
+                    id="report-year"
+                    className="h-11"
+                    onChange={(event) => handleYearChange(event.target.value)}
+                    value={startYear}
+                  >
+                    {configuration.availableYears.map((year) => (
+                      <NativeSelectOption key={year} value={String(year)}>{year}</NativeSelectOption>
+                    ))}
+                  </NativeSelect>
                 </Field>
-                <Field label="Data final" id="end-date">
-                  <Input id="end-date" className="h-11" max={maxDate} min={startDate || minDate} onChange={(event) => setEndDate(event.target.value)} required type="date" value={endDate} />
-                </Field>
-              </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Data inicial" id="start-date">
+                    <Input
+                      id="start-date"
+                      className="h-11"
+                      max={maxDate?.slice(0, inputLength)}
+                      min={startMinDate?.slice(0, inputLength)}
+                      onChange={(event) => onStartDateInput(event.target.value)}
+                      required
+                      type={granularity === "month" ? "month" : "date"}
+                      value={startDate.slice(0, inputLength)}
+                    />
+                  </Field>
+                  <Field label="Data final" id="end-date">
+                    <Input
+                      id="end-date"
+                      className="h-11"
+                      max={endMaxDate?.slice(0, inputLength)}
+                      min={(startDate || minDate)?.slice(0, inputLength)}
+                      onChange={(event) => onEndDateInput(event.target.value)}
+                      required
+                      type={granularity === "month" ? "month" : "date"}
+                      value={endDate.slice(0, inputLength)}
+                    />
+                  </Field>
+                </div>
+              )}
 
               <Field label="E-mail" id="email">
                 <Input id="email" autoComplete="email" className="h-11" onChange={(event) => setEmail(event.target.value)} placeholder="pesquisador@exemplo.org" required type="email" value={email} />

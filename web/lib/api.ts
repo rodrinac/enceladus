@@ -5,6 +5,7 @@ export type StateOption = {
 
 export type ReportType = {
   campos_data: string[];
+  colunas_mensais?: boolean;
   id: string;
   multiplos_estados: boolean;
   nome: string;
@@ -24,6 +25,14 @@ export type ProcessedReport = {
   tipo: string;
   uri?: string;
 };
+
+export type ReportDateGranularity = "day" | "month" | "year";
+
+export function reportDateGranularity(reportType: Pick<ReportType, "campos_data">): ReportDateGranularity {
+  if (reportType.campos_data.includes("dd")) return "day";
+  if (reportType.campos_data.includes("MM")) return "month";
+  return "year";
+}
 
 type ReportRequest = {
   email: string;
@@ -79,7 +88,7 @@ export async function requestReport(
   const url = new URL(apiUrl(reportType.path));
   reportRequest.states.forEach((state) => url.searchParams.append("estado", state));
 
-  if (reportType.id === "CASOS_MENSAIS_POR_MUNICIPIO_POR_ESTADO") {
+  if (reportDateGranularity(reportType) === "year") {
     url.searchParams.set("ano_inicio", reportRequest.startDate.slice(0, 4));
     url.searchParams.set("ano_fim", reportRequest.endDate.slice(0, 4));
   } else {
