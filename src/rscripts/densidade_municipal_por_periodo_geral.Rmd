@@ -12,6 +12,7 @@ params:
 header-includes:
     - \usepackage{caption}
     - \usepackage{pdflscape}
+    - \usepackage{colortbl}
 editor_options:
     chunk_output_type: console
 encoding: UTF-8

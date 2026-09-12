@@ -10,6 +10,8 @@ params:
     uf: ""
 header-includes:
     - \usepackage{caption}
+    - \usepackage{pdflscape}
+    - \usepackage{colortbl}
 editor_options:
     chunk_output_type: console
 ---
@@ -40,9 +42,10 @@ pie(
 
 \pagebreak
 
-```{r, echo = FALSE, message=FALSE}
+```{r, echo = FALSE, message=FALSE, results="asis"}
 options(digits = 2)
 library(knitr)
+library(kableExtra)
 
 arquivo <- paste0(
     params$diretorio,
@@ -50,12 +53,18 @@ arquivo <- paste0(
     sep = ""
 )
 
-kable(
+cat("\\begin{landscape}\n")
+print(kable(
     read.csv(arquivo),
+    format = "latex",
     # col.names = c("Município", "População"),
     format.args = list(decimal.mark = ",", big.mark = "."),
     row.names = TRUE
+) %>%
+ kable_styling(
+     latex_options = c("striped", "scale_down"))
 )
+cat("\\end{landscape}")
 ```
 
 \pagebreak
