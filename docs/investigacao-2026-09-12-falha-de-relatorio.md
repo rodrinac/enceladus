@@ -17,7 +17,8 @@ Nix/systemd (migrado de Docker).
 | 00:30 | Durante correção (restart da unit), a api **não sobe**: status 127. As closures `current-api`/`current-population` tinham sido apagadas pelo GC do deploy; eram `Missing` no store. |
 | 00:34–00:42 | Rebuilds e retestes sequenciais: cada reteste avança mais uma camada do pipeline (ver causas). |
 | 00:5x | PR #25 mesclado; deploy oficial via CI (run `34662939752`) verde; hospedeiro saudável. |
-| 01:5x | Reteste single-state (RS) — também falha na renderização LaTeX (causa 4, aberta). |
+| 01:5x | Reteste single-state (RS) — também falha na renderização LaTeX (causa 4). |
+| 03:0x | Causa 4 diagnosticada (`longtabu` com 27 colunas `X` do kableExtra) e corrigida no template; validado localmente com texliveFull (PDF ok, 0 overfull). |
 
 ## Evidências coletadas
 
@@ -65,20 +66,35 @@ Correção: `flake.nix` agora usa `pkgs.texliveFull`
 `texliveSmall.withPackages` (nomes de pacotes filtrados pelo base). `texliveFull`
 resolveu.
 
-### 4. `longtabu`/kableExtra — `Dimension too large` (ABERTA)
+### 4. `longtabu`/kableExtra — `Dimension too large` (corrigida)
 Com tudo acima resolvido, pdflatex morre com
 `! Dimension too large`/`\LT@max@sel` em `\end{longtabu}` na tabela de 27
 colunas X (meses + total + desvio por estado) gerada por kableExtra. Ocorre
 também com **um único estado** (RS), portanto não é escala dos 7 estados.
 O Rmd não muda desde `69bb3cf` (2021-12-10); os PDFs do Docker (09–10/09)
-renderizaram o mesmo template. Hipóteses:
-- drift de versões de R/kableExtra/`tabu`/`longtable` entre a closure Nix e o
-  image Docker (o `longtabu` é comportamento do kableExtra com
-  `repeat_header`);
-- dado de entrada mudou (commits de pipeline 2026: `9b1308c`, `a7a84ca`);
-- o diretório de relatórios mostra requisições Docker (09–11/09, uid 10001)
-  que **também não deixaram PDF**, sugerindo que a regressão pode ser
-  pré-existente à migração.
+renderizaram o mesmo template. Diagnóstico (reproduzido localmente com a
+mesma closure Nix):
+- Sem `format` explícito, o `kable()` dentro do `rmarkdown::render` gera
+  `longtable` para tabelas largas; com `full_width = TRUE` (valor original),
+  o kableExtra emite uma **`longtabu` `to \linewidth`** com 27 colunas `X`
+  (tabu). O cálculo de largura estoura a dimensão máxima do TeX
+  (16383.99998 pt) em `\end{longtabu}` — não é drift de versões de pacotes.
+- O limite depende do conteúdo: `longtabu` com corpo raso/estado único
+  estoura; tabela com 7 estados e valores típicos compila — por isso o
+  template voltou a falhar no reteste de 1 estado. Quadra com o fato de as
+  requisições Docker (09–11/09) também não terem deixado PDF: o risco de
+  estouro já estava latente no template.
+Correção em `src/rscripts/densidade_municipal_por_periodo_geral.Rmd`:
+- `format = "latex"` explícito no `kable()` (não vira mais `longtable`);
+- `full_width = TRUE` removido; `latex_options = c("striped", "scale_down")`;
+- tabela envolta em `\begin{landscape}`/`\end{landscape}`
+  (`\usepackage{pdflscape}` em `header-includes`) → `table` + `resizebox` +
+  `tabular` de 28 colunas.
+Validação: render → `.tex` → pdflatex do `texliveFull` (exit 0, PDF 4 páginas,
+0 sobrefullamento) tanto com os 7 estados quanto com o pior caso RS + valores
+de desvio com 13 casas; `ticks` nas verificações de pipeline (test_report_years
+e test_datasus_cache) seguem PASS. Os outros dois templates renderizam sem
+falha (o mensal gera PDF direto; tabela larga apenas com overfull visual).
 
 ## Correções aplicadas (estado atual do `main`)
 
@@ -93,19 +109,27 @@ renderizaram o mesmo template. Hipóteses:
 - Artefatos dos retestes falhos removidos do diretório de relatórios
   (workdirs `a632f2b0…`, `e079b134…`, `a175fbf4…`, `d79f142c…`, CSVs e `.tex`
   órfãos, `e2295dd6…`).
+- Causa 4 corrigida em `src/rscripts/densidade_municipal_por_periodo_geral.Rmd`
+  (detalhes na seção 4); validado com a closure `texliveFull`.
 
 ## Pendências
 
-1. **Geração de PDF ainda falha** com qualquer requisição (causa 4). Próximo
-   passo natural: ajustar o código do relatório
-   (`src/rscripts/densidade_municipal_por_periodo_geral.Rmd` — opções de
-   `kableExtra`: `longtable`/`latex_options("repeat_header")`/fonte) ou
-   investigar a versão dos pacotes R da closure vs. Docker. Verificar também os
-   outros dois templates (`densidade_municipal_por_periodo.Rmd`,
-   `casos_mensais_por_municipio_por_estado.Rmd`).
+1. ~~Geração de PDF ainda falha com qualquer requisição (causa 4)~~ —
+   **corrigida** (ver causa 4). Acompanhamentos recomendados:
+   - aplicar o mesmo tratamento (`format = "latex"` + `scale_down`, sem
+     `full_width`) em
+     `casos_mensais_por_municipio_por_estado.Rmd` — hoje renderiza, mas a
+     tabela larga (15 cols) sai com sobrefullamento visual;
+   - adicionar smoke test de renderização em `tests/test_report_years.R` —
+     hoje o teste para no parsing de anos e **não exercita** o render
+     LaTeX, então não teria pegado esta falha.
 2. `curl /health` só prova que o processo HTTP responde; não cobre
    OpenDataSUS, SIDRA, Redis, renderização R nem SES.
 3. Avisos de ambiente no R: `TZ` ausente (`/etc/localtime` não é symlink,
-   `timedatectl` reporta `n/a`) — baixa prioridade.
+   `timedatectl` reporta `n/a`) — baixa prioridade. Nota de dev (Mac local):
+   o TeX do sistema (`/usr/local/texlive/2025basic`, sem `multirow.sty`)
+   sombreia o `texliveFull` da closure no passo de PDF do `rmarkdown::render`;
+   para validar localmente, fazer knit → `.tex` e compilar com o `pdflatex`
+   da closure Nix.
 4. A migração para Go (runner, fetchers e API) deve incorporar as mesmas
    garantias de `HOME` e timeouts — ver `docs/go-migration.md`.

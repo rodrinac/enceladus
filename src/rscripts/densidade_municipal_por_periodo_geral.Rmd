@@ -11,6 +11,7 @@ params:
     uf: ""
 header-includes:
     - \usepackage{caption}
+    - \usepackage{pdflscape}
 editor_options:
     chunk_output_type: console
 encoding: UTF-8
@@ -25,22 +26,25 @@ _OBS: o relatório considera o municipio de residencia da vítima._
 
 ## Desvio padrão de casos entre `r format(params$dt_inicio, '%d/%m/%Y')` e `r format(params$dt_fim, '%d/%m/%Y')`.
 
-```{r, echo = FALSE, message=FALSE}
+```{r, echo = FALSE, message=FALSE, results="asis"}
 options(digits = 2)
 library(knitr)
 library(kableExtra)
 
 arquivo <- paste0(params$diretorio, params$desvio_padrao_por_estado, sep = "")
 
-kable(
+cat("\\begin{landscape}\n")
+print(kable(
     read.csv(arquivo),
+    format = "latex",
     format.args = list(decimal.mark = ",", big.mark = "."),
     row.names = TRUE
 ) %>%
  kable_styling(
-            latex_options = c("striped"),
-            full_width = TRUE) %>%
+            latex_options = c("striped", "scale_down")) %>%
   row_spec(0, angle = 90)
+)
+cat("\\end{landscape}")
 ```
 
 \pagebreak
