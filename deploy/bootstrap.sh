@@ -185,6 +185,19 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 UNIT
 
+cat >/etc/systemd/system/enceladus-population.timer <<'UNIT'
+[Unit]
+Description=Refresh Enceladus IBGE population data monthly
+
+[Timer]
+OnCalendar=*-*-01 04:00:00
+Persistent=true
+Unit=enceladus-population.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 cat >/etc/systemd/system/enceladus-api.service <<'UNIT'
 [Unit]
 Description=Enceladus Quart API
@@ -206,7 +219,7 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable enceladus-redis.service enceladus-population.service enceladus-api.service
+systemctl enable enceladus-redis.service enceladus-population.service enceladus-population.timer enceladus-api.service
 echo "Units written and enabled"
 echo "::endgroup::"
 
