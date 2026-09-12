@@ -4,7 +4,7 @@
 
 O Enceladus Big Data ajuda pesquisadores da Sociedade Brasileira de Queimaduras (SBQ) a
 coletar, processar e transformar dados brutos em relatórios úteis. O stack combina uma
-interface Next.js, uma API Quart e processamento estatístico em R.
+interface Next.js, uma API escrita em Go e processamento estatístico em R.
 
 Desenvolvido por [José Inácio Rodrigues da Silva](https://github.com/josersinacio) e
 [Josué de Paulo Viana](https://github.com/josuepviana), com orientação do
@@ -13,12 +13,12 @@ Desenvolvido por [José Inácio Rodrigues da Silva](https://github.com/josersina
 
 ## Executar localmente
 
-O [flake Nix](flake.nix) fornece um ambiente reprodutível com Python 3.12, R (com
+O [flake Nix](flake.nix) fornece um ambiente reprodutível com Go, R (com
 `microdatasus` e as dependências dos relatórios), Pandoc, LaTeX e os aplicativos da API
 (`enceladus-api`) e da população IBGE (`enceladus-population`):
 
     nix develop            # shell interativo com todas as ferramentas
-    nix run .#api          # inicia o Hypercorn com a API
+    nix run .#api          # inicia a API
     nix run .#population   # busca população IBGE e o ano máximo de SIM
 
 A API espera um Redis em `localhost:6379` por padrão (`REDIS_HOST`/`REDIS_PORT`/
@@ -27,7 +27,7 @@ máquina; no Linux, o dev shell já inclui o `redis` do nixpkgs. Antes de usar o
 relatórios, execute `nix run .#population` uma vez para gerar o denominador de
 densidade e o limite de anos do DataSUS.
 
-Para ajustar o endereço do Hypercorn:
+Para ajustar o endereço da API:
 
     ENCELADUS_BIND=0.0.0.0:8000 nix run .#api
 
@@ -74,7 +74,7 @@ para alterar esse limite.
 ## Interface e GitHub Pages
 
 A interface em `web/` usa Next.js, TypeScript, Tailwind CSS e o tema Catppuccin Latte. A
-exportação estática é publicada no GitHub Pages; Python, R, Pandoc e LaTeX não precisam
+exportação estática é publicada no GitHub Pages; Go, R, Pandoc e LaTeX não precisam
 ser instalados no host.
 
 O workflow `.github/workflows/pages.yml` publica a exportação estática quando há mudanças
@@ -104,23 +104,9 @@ configurar DNS, preparar os ambientes do GitHub e executar o primeiro release.
 Após alterar a API, os scripts R ou a interface, reconstrua e valide o stack completo:
 
     nix build .#api
-    pytest
-    ruff check .
+    cd go && go vet ./... && go test ./...
+    nix develop . --command bash -c 'cd src && Rscript ../tests/test_report_years.R && Rscript ../tests/test_datasus_cache.R'
 
 As configurações são controladas por variáveis de ambiente (Redis, SES, CORS, períodos
-do IBGE e caminhos de dados); consulte `src/settings.py` e `.env.example` como
+do IBGE e caminhos de dados); consulte `go/internal/settings` e `.env.example` como
 referência.
-
-Para verificar cada dependência externa sem gerar relatórios ou enviar e-mail:
-
-    python scripts/probe_dependencies.py \
-      --api-url https://sua-api.execute-api.eu-west-1.amazonaws.com
-
-O comando testa DNS, a tabela 6579 do SIDRA, listagem e download parcial dos arquivos
-SIM-DO no FTP do DataSUS e os endpoints públicos da API. Use `--check-ses` para acrescentar
-uma consulta somente leitura à conta SES configurada, ou `--json` para saída estruturada.
-O processo retorna código diferente de zero quando qualquer verificação executada falha.
-Em redes com inspeção TLS, passe o certificado corporativo em PEM com `--ca-bundle`.
-`--insecure` serve apenas para confirmar se uma falha vem da cadeia de certificados local.
-O diagnóstico também compara o FTP com a API e o arquivo ZIP anual publicados pelo
-OpenDataSUS sobre HTTPS.

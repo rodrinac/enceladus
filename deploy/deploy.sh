@@ -2,7 +2,7 @@
 # Deploys the Enceladus API built from the local Nix flake to the production
 # host. Refreshes the repository checkout, rebuilds the API and population
 # out-links, feeds the runtime environment (including the Redis password) to
-# the systemd units and health-checks Quart before promoting the release.
+# the systemd units and health-checks the API before promoting the release.
 #
 # Emits GitHub Actions workflow commands so the phases render as collapsible
 # groups and failures appear prominently in the Deploy API to EC2 job log.

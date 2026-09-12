@@ -101,7 +101,7 @@ sem argumento de caminho de script.
 
 Escritos para `internal/config`, `internal/jobstatus`, `internal/rreport`
 (timeout rc 124 com `sh -c`), `internal/processed` (sort) e `internal/api`
-(server com Rscript fake). Faltam testes de `cmd/fetch-sim-archives`
+(server com Rscript fake). Também para `cmd/fetch-sim-archives`
 (fixtures CSV/JSON zip) e `cmd/fetch-population` (normalização/`hasValidCache`).
 
 ## Empacotamento e CI
@@ -119,10 +119,10 @@ Escritos para `internal/config`, `internal/jobstatus`, `internal/rreport`
 - [x] Packages Go (`cmd/*` + `internal/*`) escrevidos; `go build ./...` e
   `go vet ./...` passam (toolchain via `nix shell nixpkgs#go`).
 - [x] Testes de `config`, `jobstatus`, `rreport`, `processed`, `api` escritos.
-- [ ] Rodar `go test ./...` e ajustar falhas.
-- [ ] Testes de `cmd/fetch-sim-archives` e `cmd/fetch-population`.
-- [ ] `flake.nix` com `buildGoModule`, `vendorHash`, wrappers; drop do python.
-- [ ] Job `go` no CI; `go/**` nas paths do workflow de deploy.
+- [x] Rodar `go test ./...` e ajustar falhas.
+- [x] Testes de `cmd/fetch-sim-archives` e `cmd/fetch-population`.
+- [x] `flake.nix` com `buildGoModule`, `vendorHash`, wrappers; drop do python.
+- [x] Job `go` no CI; `go/**` nas paths do workflow de deploy.
 - [ ] PR de migração revisado e validado; deploy verde; revalidação do R.
 
 ## Riscos e notas

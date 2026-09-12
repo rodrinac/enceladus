@@ -8,6 +8,7 @@ on:
       - "deploy/**"
       - "flake.nix"
       - "flake.lock"
+      - "go/**"
       - "pyproject.toml"
       - "scripts/**"
       - "src/**"
