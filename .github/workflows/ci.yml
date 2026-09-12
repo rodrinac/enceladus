@@ -56,7 +56,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v23
       - uses: DeterminateSystems/magic-nix-cache-action@v15
         with:
-          upstream_cache: true
+          use-flakehub: disabled
       - name: Build the API and population apps
         run: |
           nix build .#api
