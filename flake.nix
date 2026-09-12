@@ -35,12 +35,13 @@
           python = pkgs.python312.withPackages (ps: [
             ps.boto3 ps.hypercorn ps."quart-cors" ps.quart ps.pyyaml ps.redis
           ]);
-          latex = pkgs.texliveSmall;
+          latex = pkgs.texliveFull;
           api = pkgs.writeShellApplication {
             name = "enceladus-api";
             runtimeInputs = [ latex pkgs.pandoc python r ];
             text = ''
               export PYTHONPATH=${self}/src''${PYTHONPATH:+:$PYTHONPATH}
+              export HOME="''${HOME:-/root}"
               export ENCELADUS_HOME="''${ENCELADUS_HOME:-$PWD/.enceladus}"
               mkdir -p "$ENCELADUS_HOME"
               exec hypercorn --bind "''${ENCELADUS_BIND:-0.0.0.0:8000}" main:app
@@ -50,6 +51,7 @@
             name = "enceladus-population";
             runtimeInputs = [ python ];
             text = ''
+              export HOME="''${HOME:-/root}"
               export ENCELADUS_HOME="''${ENCELADUS_HOME:-$PWD/.enceladus}"
               mkdir -p "$ENCELADUS_HOME"
               exec python ${self}/scripts/fetch_population.py

@@ -47,6 +47,7 @@ if [[ ! -f $env_file ]]; then
   umask 077
   cat > "$env_file" <<EOF
 CORS_ORIGINS=${CORS_ORIGINS:?CORS_ORIGINS must be set in legacy runtime.env}
+HOME=${HOME:-/root}
 ENCELADUS_DATASUS_CACHE_MAX_BYTES=${ENCELADUS_DATASUS_CACHE_MAX_BYTES:-5368709120}
 ENCELADUS_DATASUS_CACHE_PATH=${ENCELADUS_DATASUS_CACHE_PATH:-/srv/enceladus/relatorios/.cache/datasus}
 ENCELADUS_DATASUS_MAX_YEAR_PATH=${ENCELADUS_DATASUS_MAX_YEAR_PATH:-/srv/enceladus/population/datasus-max-year.txt}
@@ -139,6 +140,11 @@ echo "::group::Provision systemd units"
 if [[ ! -x $repo/current-redis/bin/redis-server ]]; then
   nix build "$repo#redis" --out-link "$repo/current-redis"
 fi
+# Pin the binary as a GC root so nix-collect-garbage during deploys keeps it.
+if [[ -e $repo/current-redis ]]; then
+  mkdir -p /nix/var/nix/gcroots/enceladus
+  ln -sfn "$(readlink -f "$repo/current-redis")" /nix/var/nix/gcroots/enceladus/redis
+fi
 
 cat >/etc/systemd/system/enceladus-redis.service <<'UNIT'
 [Unit]
@@ -149,6 +155,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/enceladus/runtime.env
+Environment=HOME=/root
 ExecStart=/bin/sh -c 'exec /opt/enceladus/current-redis/bin/redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --appendfsync everysec --dir /srv/enceladus/redis --port 6379'
 Restart=on-failure
 RestartSec=5
@@ -168,6 +175,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=/etc/enceladus/runtime.env
+Environment=HOME=/root
 ExecStart=/bin/sh -c 'exec /opt/enceladus/current-population/bin/enceladus-population'
 TimeoutStartSec=600
 Restart=no
@@ -186,6 +194,7 @@ Wants=network-online.target enceladus-redis.service
 [Service]
 Type=simple
 EnvironmentFile=/etc/enceladus/runtime.env
+Environment=HOME=/root
 ExecStart=/bin/sh -c 'exec /opt/enceladus/current-api/bin/enceladus-api'
 Restart=on-failure
 RestartSec=5
