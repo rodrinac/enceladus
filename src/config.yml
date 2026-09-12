@@ -87,6 +87,7 @@ relatorios:
     path: '/relatorios/queimaduras/densidade-municipal-por-periodo-geral'
     multiplos_estados: true
     campos_data: ['MM', 'yyyy']
+    colunas_mensais: true
     parametros: 
       - estado
       - data_inicio
@@ -106,7 +107,8 @@ relatorios:
     nome: Casos Mensais por Município por Estado
     path: '/relatorios/queimaduras/casos-mensais-por-municipio-por-estado'
     multiplos_estados: true
-    campos_data: ['dd', 'MM', 'yyyy']
+    campos_data: ['yyyy']
+    colunas_mensais: true
     parametros: 
       - estado
       - ano_inicio

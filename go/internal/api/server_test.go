@@ -73,19 +73,30 @@ func newTestEnv(t *testing.T) (*Server, *fakeStore, *emailLog) {
 		},
 		Relatorios: []config.Relatorio{
 			{
-				ID:   reportTypeGeral,
-				Nome: "Densidade municipal por período",
-				Path: "/relatorios/queimaduras/densidade-municipal-por-periodo-geral",
+				ID:               reportTypeGeral,
+				Nome:             "Densidade municipal por período",
+				Path:             "/relatorios/queimaduras/densidade-municipal-por-periodo-geral",
+				MultiplosEstados: true,
+				ColunasMensais:   true,
+				CamposData:       []string{"MM", "yyyy"},
+				Parametros:       []string{"estado", "data_inicio", "data_fim", "email"},
 			},
 			{
-				ID:   reportTypeDensity,
-				Nome: "Densidade municipal por período",
-				Path: "/relatorios/queimaduras/densidade-municipal-por-periodo",
+				ID:               reportTypeDensity,
+				Nome:             "Densidade municipal por período",
+				Path:             "/relatorios/queimaduras/densidade-municipal-por-periodo",
+				MultiplosEstados: false,
+				CamposData:       []string{"dd", "MM", "yyyy"},
+				Parametros:       []string{"estado", "data_inicio", "data_fim", "email"},
 			},
 			{
-				ID:   reportTypeCasos,
-				Nome: "Casos mensais por município por estado",
-				Path: "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado",
+				ID:               reportTypeCasos,
+				Nome:             "Casos mensais por município por estado",
+				Path:             "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado",
+				MultiplosEstados: true,
+				ColunasMensais:   true,
+				CamposData:       []string{"yyyy"},
+				Parametros:       []string{"estado", "ano_inicio", "ano_fim", "email"},
 			},
 		},
 	}
@@ -195,7 +206,7 @@ func TestProcessadosEmpty(t *testing.T) {
 func TestSubmitGeral(t *testing.T) {
 	server, store, mail := newTestEnv(t)
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo-geral" +
-		"?estado=CE&estado=BA&data_inicio=2020&data_fim=2022&email=a@b.co"
+		"?estado=AC&estado=CE&data_inicio=2022-01-01&data_fim=2022-12-31&email=a@b.co"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d, body %s", recorder.Code, recorder.Body.String())
@@ -216,7 +227,7 @@ func TestSubmitGeral(t *testing.T) {
 		return len(server.Registry.List()) == 0
 	})
 
-	fileName := "CE-BA.2020.2022.pdf"
+	fileName := "AC-CE.2022-01-01.2022-12-31.pdf"
 	store.mu.Lock()
 	_, saved := store.dates["dataProcessamento.DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL."+fileName]
 	store.mu.Unlock()
@@ -229,7 +240,7 @@ func TestSubmitGeral(t *testing.T) {
 	if mail.to != "a@b.co" || mail.fileName != "relatorio_densidade_municipal.pdf" {
 		t.Fatalf("unexpected email: %+v", mail)
 	}
-	if mail.subject != "Relatório de densidade municipal por período - CE, BA, entre 2020 e 2022" {
+	if mail.subject != "Relatório de densidade municipal por período - AC, CE, entre 2022-01-01 e 2022-12-31" {
 		t.Fatalf("unexpected subject: %q", mail.subject)
 	}
 	if mail.attachmentLength == 0 {
@@ -240,7 +251,7 @@ func TestSubmitGeral(t *testing.T) {
 func TestSubmitCasos(t *testing.T) {
 	server, _, mail := newTestEnv(t)
 	target := "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado" +
-		"?estado=RN&ano_inicio=2021&ano_fim=2021&email=a@b.co"
+		"?estado=AC&ano_inicio=2021&ano_fim=2021&email=a@b.co"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d, body %s", recorder.Code, recorder.Body.String())
@@ -249,7 +260,7 @@ func TestSubmitCasos(t *testing.T) {
 
 	mail.mu.Lock()
 	defer mail.mu.Unlock()
-	if mail.subject != "Diagrama de distribuição do local de falecimento para RN, em 2021" {
+	if mail.subject != "Diagrama de distribuição do local de falecimento para AC, em 2021" {
 		t.Fatalf("unexpected subject: %q", mail.subject)
 	}
 	if mail.fileName != "relatorio.pdf" {
@@ -260,7 +271,7 @@ func TestSubmitCasos(t *testing.T) {
 func TestSubmitWithoutEmailReturnsNullDestino(t *testing.T) {
 	server, _, _ := newTestEnv(t)
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo" +
-		"?estado=CE&data_inicio=2020&data_fim=2022"
+		"?estado=CE&data_inicio=2021-01-01&data_fim=2022-12-31"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d", recorder.Code)
@@ -285,7 +296,7 @@ func TestFailedReportMarksJob(t *testing.T) {
 	server.Worker.Runner.ScriptBin = failureScript
 
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo" +
-		"?estado=CE&data_inicio=2020&data_fim=2022&email=a@b.co"
+		"?estado=CE&data_inicio=2021-01-01&data_fim=2022-12-31&email=a@b.co"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d", recorder.Code)
@@ -393,7 +404,7 @@ func TestRunningJobVisibleInProcessados(t *testing.T) {
 func TestGeralTODOSExpandsToAllStates(t *testing.T) {
 	server, store, mail := newTestEnv(t)
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo-geral" +
-		"?estado=TODOS&data_inicio=2020&data_fim=2022&email=a@b.co"
+		"?estado=TODOS&data_inicio=2022-01-01&data_fim=2022-12-31&email=a@b.co"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d", recorder.Code)
@@ -402,12 +413,88 @@ func TestGeralTODOSExpandsToAllStates(t *testing.T) {
 
 	mail.mu.Lock()
 	defer mail.mu.Unlock()
-	if mail.subject != "Relatório de densidade municipal por período - AC, CE, entre 2020 e 2022" {
+	if mail.subject != "Relatório de densidade municipal por período - AC, CE, entre 2022-01-01 e 2022-12-31" {
 		t.Fatalf("unexpected subject: %q", mail.subject)
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if _, ok := store.dates["dataProcessamento.DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL.AC-CE.2020.2022.pdf"]; !ok {
+	if _, ok := store.dates["dataProcessamento.DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL.AC-CE.2022-01-01.2022-12-31.pdf"]; !ok {
 		t.Fatalf("expected expansion to all states: %v", store.dates)
 	}
+}
+
+func TestSubmitRejectsInvalidPayload(t *testing.T) {
+	server, _, _ := newTestEnv(t)
+	cases := []struct {
+		name   string
+		target string
+	}{
+		{
+			name:   "estado fora da lista de configuração",
+			target: "/relatorios/queimaduras/densidade-municipal-por-periodo?estado=../../etc&data_inicio=2022-01-01&data_fim=2022-12-31",
+		},
+		{
+			name:   "sem estados",
+			target: "/relatorios/queimaduras/densidade-municipal-por-periodo?data_inicio=2022-01-01&data_fim=2022-12-31",
+		},
+		{
+			name:   "data com formato inválido",
+			target: "/relatorios/queimaduras/densidade-municipal-por-periodo?estado=CE&data_inicio=2022&data_fim=2022-12-31",
+		},
+		{
+			name:   "data inexistente",
+			target: "/relatorios/queimaduras/densidade-municipal-por-periodo?estado=CE&data_inicio=2022-13-45&data_fim=2022-12-31",
+		},
+		{
+			name:   "data inicial depois da final",
+			target: "/relatorios/queimaduras/densidade-municipal-por-periodo?estado=CE&data_inicio=2022-12-31&data_fim=2022-01-01",
+		},
+		{
+			name:   "ano fora do intervalo disponível",
+			target: "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado?estado=AC&ano_inicio=1999&ano_fim=1999",
+		},
+		{
+			name:   "período acima de um ano para colunas mensais (geral)",
+			target: "/relatorios/queimaduras/densidade-municipal-por-periodo-geral?estado=AC&data_inicio=2022-01-01&data_fim=2023-12-31",
+		},
+		{
+			name:   "período acima de um ano para colunas mensais (casos)",
+			target: "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado?estado=AC&ano_inicio=2022&ano_fim=2023",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := server.request(t, "POST", tc.target, nil)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), "mensagem") {
+				t.Fatalf("expected a mensagem body, got %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestSubmitRejectsTwoYearRangeForMonthlyColumns(t *testing.T) {
+	server, _, _ := newTestEnv(t)
+	target := "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado" +
+		"?estado=AC&ano_inicio=2022&ano_fim=2023"
+	recorder := server.request(t, "POST", target, nil)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "colunas mensais") {
+		t.Fatalf("expected monthly-columns message, got %s", recorder.Body.String())
+	}
+}
+
+func TestSubmitAcceptsMultiYearForDayGranularity(t *testing.T) {
+	server, _, _ := newTestEnv(t)
+	target := "/relatorios/queimaduras/densidade-municipal-por-periodo" +
+		"?estado=CE&data_inicio=2021-01-01&data_fim=2023-12-31&email=a@b.co"
+	recorder := server.request(t, "POST", target, nil)
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("unexpected status: %d, body %s", recorder.Code, recorder.Body.String())
+	}
+	waitFor(t, 3*time.Second, func() bool { return len(server.Registry.List()) == 0 })
 }

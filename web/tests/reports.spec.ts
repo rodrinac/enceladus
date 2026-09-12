@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 const reportTypes = [
-  { id: "DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL", nome: "Densidade geral", multiplos_estados: true, path: "/relatorios/queimaduras/densidade-municipal-por-periodo-geral" },
-  { id: "DENSIDADE_MUNICIPAL_POR_PERIODO", nome: "Densidade municipal", multiplos_estados: false, path: "/relatorios/queimaduras/densidade-municipal-por-periodo" },
-  { id: "CASOS_MENSAIS_POR_MUNICIPIO_POR_ESTADO", nome: "Casos mensais", multiplos_estados: true, path: "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado" },
+  { id: "DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL", nome: "Densidade geral", multiplos_estados: true, colunas_mensais: true, campos_data: ["MM", "yyyy"], path: "/relatorios/queimaduras/densidade-municipal-por-periodo-geral" },
+  { id: "DENSIDADE_MUNICIPAL_POR_PERIODO", nome: "Densidade municipal", multiplos_estados: false, campos_data: ["dd", "MM", "yyyy"], path: "/relatorios/queimaduras/densidade-municipal-por-periodo" },
+  { id: "CASOS_MENSAIS_POR_MUNICIPIO_POR_ESTADO", nome: "Casos mensais", multiplos_estados: true, colunas_mensais: true, campos_data: ["yyyy"], path: "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado" },
 ];
 
 test.beforeEach(async ({ page }) => {
@@ -28,23 +28,23 @@ test.beforeEach(async ({ page }) => {
 test("submits dates after 2019 and preserves multiple/single state selection", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("Nenhum relatório foi solicitado ainda.")).toBeVisible();
-  await expect(page.getByLabel("Data inicial")).toHaveValue("2023-01-01");
-  await expect(page.getByLabel("Data final")).toHaveValue("2024-12-31");
+  await expect(page.getByLabel("Data inicial")).toHaveValue("2024-01");
+  await expect(page.getByLabel("Data final")).toHaveValue("2024-12");
   const faviconUrl = await page.locator('link[rel="icon"]').getAttribute("href");
   expect(faviconUrl).toBeTruthy();
   expect((await page.request.get(new URL(faviconUrl!, page.url()).toString())).status()).toBe(200);
   await page.getByRole("checkbox", { name: "Distrito Federal" }).check();
   await page.getByRole("checkbox", { name: "Minas Gerais" }).check();
-  await page.getByLabel("Data inicial").fill("2024-01-01");
-  await page.getByLabel("Data final").fill("2024-12-31");
-  await expect(page.getByLabel("Data final")).toHaveAttribute("max", "2024-12-31");
+  await page.getByLabel("Data inicial").fill("2024-03");
+  await page.getByLabel("Data final").fill("2024-10");
+  await expect(page.getByLabel("Data inicial")).toHaveAttribute("max", "2024-12");
   await page.getByLabel("E-mail").fill("test@example.invalid");
   const submitted = page.waitForRequest((request) => request.method() === "POST");
   await page.getByRole("button", { name: "Processar relatório" }).click();
   const requestUrl = new URL((await submitted).url());
   expect(requestUrl.searchParams.getAll("estado")).toEqual(["DF", "MG"]);
-  expect(requestUrl.searchParams.get("data_inicio")).toBe("2024-01-01");
-  expect(requestUrl.searchParams.get("data_fim")).toBe("2024-12-31");
+  expect(requestUrl.searchParams.get("data_inicio")).toBe("2024-03-01");
+  expect(requestUrl.searchParams.get("data_fim")).toBe("2024-10-01");
   await expect(page.getByRole("status")).toContainText("test-request");
 
   await page.getByLabel("Tipo de relatório").selectOption(reportTypes[1].id);
@@ -54,6 +54,7 @@ test("submits dates after 2019 and preserves multiple/single state selection", a
   await expect(page.getByRole("radio", { name: "Minas Gerais" })).toBeChecked();
 
   await page.getByLabel("Tipo de relatório").selectOption(reportTypes[2].id);
+  await expect(page.getByLabel("Ano")).toHaveValue("2024");
   await page.getByRole("button", { name: "Selecionar todos" }).click();
   const monthly = page.waitForRequest((request) => request.method() === "POST");
   await page.getByRole("button", { name: "Processar relatório" }).click();
@@ -62,6 +63,31 @@ test("submits dates after 2019 and preserves multiple/single state selection", a
   expect(monthlyUrl.searchParams.get("ano_fim")).toBe("2024");
   await page.getByRole("button", { name: "Limpar" }).click();
   await expect(page.getByRole("checkbox", { name: "Distrito Federal" })).not.toBeChecked();
+});
+
+test("switches date input granularity and clamps monthly-column reports to one year", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByLabel("Data inicial")).toHaveValue("2024-01");
+  await expect(page.getByLabel("Data final")).toHaveValue("2024-12");
+
+  await page.getByLabel("Tipo de relatório").selectOption(reportTypes[1].id);
+  await expect(page.getByLabel("Data inicial")).toHaveValue("2024-01-01");
+  await expect(page.getByLabel("Data final")).toHaveValue("2024-12-31");
+  await page.getByLabel("Data inicial").fill("2023-01-01");
+  await page.getByLabel("Data final").fill("2024-12-31");
+  await expect(page.getByLabel("Data final")).toHaveAttribute("max", "2024-12-31");
+
+  await page.getByLabel("Tipo de relatório").selectOption(reportTypes[2].id);
+  await expect(page.getByLabel("Ano")).toHaveValue("2024");
+  await page.getByLabel("Ano").selectOption("2023");
+  await expect(page.getByLabel("Ano")).toHaveValue("2023");
+
+  await page.getByLabel("Tipo de relatório").selectOption(reportTypes[0].id);
+  await expect(page.getByLabel("Data inicial")).toHaveValue("2023-01");
+  await expect(page.getByLabel("Data final")).toHaveValue("2023-12");
+  await page.getByLabel("Data inicial").fill("2022-06");
+  await expect(page.getByLabel("Data final")).toHaveValue("2022-12");
+  await expect(page.getByLabel("Data final")).toHaveAttribute("max", "2022-12");
 });
 
 test("renders processed reports and keeps the Latte palette on mobile", async ({ page }) => {
@@ -95,8 +121,8 @@ test("shows configuration and submission errors", async ({ page }) => {
   await page.unroute("**/config/anos");
   await page.reload();
   await page.getByRole("checkbox", { name: "Distrito Federal" }).check();
-  await page.getByLabel("Data inicial").fill("2024-01-01");
-  await page.getByLabel("Data final").fill("2024-12-31");
+  await page.getByLabel("Data inicial").fill("2024-01");
+  await page.getByLabel("Data final").fill("2024-12");
   await page.getByLabel("E-mail").fill("test@example.invalid");
   await page.route("**/relatorios/queimaduras/**", (route) => route.fulfill({ status: 500 }));
   await page.getByRole("button", { name: "Processar relatório" }).click();

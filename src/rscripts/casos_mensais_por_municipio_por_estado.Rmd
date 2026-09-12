@@ -59,10 +59,12 @@ print(kable(
     format = "latex",
     # col.names = c("Município", "População"),
     format.args = list(decimal.mark = ",", big.mark = "."),
-    row.names = TRUE
+    row.names = TRUE,
+    longtable = TRUE
 ) %>%
  kable_styling(
-     latex_options = c("striped", "scale_down"))
+     latex_options = c("striped", "repeat_header"),
+     font_size = 6)
 )
 cat("\\end{landscape}")
 ```
