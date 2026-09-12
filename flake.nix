@@ -35,15 +35,13 @@
           python = pkgs.python312.withPackages (ps: [
             ps.boto3 ps.hypercorn ps."quart-cors" ps.quart ps.pyyaml ps.redis
           ]);
-          latex = pkgs.texlive.combine {
-            inherit (pkgs.texlive)
-              scheme-medium
-              # rmarkdown/kableExtra PDF output needs more than texliveSmall
-              caption capt-of booktabs longtable array multirow wrapfig
-              colortbl float tabularx threeparttable threeparttablex
-              xcolor geometry hyperref url microtype upquote
-              ;
-          };
+          latex = pkgs.texliveSmall.withPackages (ps: [
+                  # rmarkdown/kableExtra PDF output needs more than texliveSmall
+                  ps.caption ps.capt-of ps.booktabs ps.longtable ps.multirow
+                  ps.wrapfig ps.colortbl ps.float ps.tabularx
+                  ps.threeparttable ps.threeparttablex ps.xcolor ps.geometry
+                  ps.hyperref ps.url ps.microtype ps.upquote ps.framed
+                ]);
           api = pkgs.writeShellApplication {
             name = "enceladus-api";
             runtimeInputs = [ latex pkgs.pandoc python r ];
