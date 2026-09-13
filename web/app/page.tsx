@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,12 @@ export default function Home() {
     }
   }, []);
 
+  // Timestamp of the last SSE push. While pushes keep arriving the 10s
+  // poller below stands down, so a healthy tab holds one cheap stream
+  // instead of a stream plus a poller. Fails open: no pushes (SSE
+  // unsupported, proxy hiccup) means polling continues as before.
+  const lastPushAtRef = useRef<number>(0);
+
   useEffect(() => {
     const controller = new AbortController();
 
@@ -108,11 +114,19 @@ export default function Home() {
     // Push updates via SSE; the interval below stays as a fallback for
     // browsers/proxies without EventSource support.
     const unsubscribe = subscribeToReports((pushedReports) => {
+      lastPushAtRef.current = Date.now();
       setReports(pushedReports);
       setReportsError(null);
       setReportsLoading(false);
     });
-    const interval = window.setInterval(() => void refreshReports(), 10_000);
+    // Skip the poll while SSE is healthy: pushes arrive at least every ~20s
+    // (the server closes idle streams after 20s and EventSource reconnects
+    // with a fresh snapshot), so a 25s hush window only ever suppresses
+    // redundant fetches and fails open to polling.
+    const interval = window.setInterval(() => {
+      if (Date.now() - lastPushAtRef.current < 25_000) return;
+      void refreshReports();
+    }, 10_000);
 
     return () => {
       controller.abort();
