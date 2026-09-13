@@ -67,7 +67,11 @@ redis_password=$(aws secretsmanager get-secret-value \
   --output text)
 
 umask 077
-cat > "$env_file" <<EOF
+# Write-then-rename so a failure mid-write (or an aborted heredoc expansion)
+# can never leave a truncated runtime.env behind: the previous release's
+# outage came from `cat >` truncating the file before `set -u` aborted.
+tmp_env="$env_file.new"
+cat > "$tmp_env" <<EOF
 APP_REF=$ref
 HOME=${HOME:-/root}
 AWS_DEFAULT_REGION=$region
@@ -90,6 +94,7 @@ ENCELADUS_REPORTS_PREFIX=${ENCELADUS_REPORTS_PREFIX:-}
 SOURCE_REF=$SOURCE_REF
 SOURCE_REPOSITORY=$SOURCE_REPOSITORY
 EOF
+mv "$tmp_env" "$env_file"
 echo "Redis password refreshed from Secrets Manager"
 echo "::endgroup::"
 
