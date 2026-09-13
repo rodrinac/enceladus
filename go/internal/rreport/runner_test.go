@@ -52,12 +52,53 @@ func TestRunnerDefaults(t *testing.T) {
 	}
 
 	runner := &Runner{RscriptsDir: "rscripts"}
-	_, _ = runner.Run("script.R", nil)
+	_, _ = runner.Run("densidade_municipal_por_periodo.R", nil)
 	if len(capturedCommand) == 0 || capturedCommand[0] != "Rscript" {
 		t.Fatalf("expected default Rscript binary, got %v", capturedCommand)
 	}
 	if _, err := os.Stat(filepath.Join("rscripts")); err != nil {
 		t.Skip("no rscripts dir here")
+	}
+}
+
+func TestRunnerRejectsUnknownScript(t *testing.T) {
+	original := ExecFn
+	defer func() { ExecFn = original }()
+
+	called := false
+	ExecFn = func(command []string, dir string, timeout time.Duration) (int, string) {
+		called = true
+		return 0, ""
+	}
+
+	runner := &Runner{RscriptsDir: "rscripts"}
+	for _, script := range []string{"script.R", "../evil.R", "-e.R", "casos_mensais_por_municipio_por_estado.r"} {
+		if code, _ := runner.Run(script, nil); code == 0 {
+			t.Fatalf("expected rejection for script %q", script)
+		}
+	}
+	if called {
+		t.Fatal("ExecFn must not run for rejected scripts")
+	}
+}
+
+func TestRunnerRejectsOptionInjection(t *testing.T) {
+	original := ExecFn
+	defer func() { ExecFn = original }()
+
+	called := false
+	ExecFn = func(command []string, dir string, timeout time.Duration) (int, string) {
+		called = true
+		return 0, ""
+	}
+
+	runner := &Runner{RscriptsDir: "rscripts"}
+	if code, _ := runner.Run("densidade_municipal_por_periodo.R",
+		[]string{"CE", "2020", "2022", "/out.pdf", "-e;rm -rf /"}); code == 0 {
+		t.Fatal("expected rejection for option-injection argument")
+	}
+	if called {
+		t.Fatal("ExecFn must not run for rejected arguments")
 	}
 }
 

@@ -136,7 +136,7 @@ func TestUsesYears(t *testing.T) {
 	if cfg.Relatorios[0].UsesYears() {
 		t.Fatal("date-parametrized report should not use years")
 	}
-	years := Relatorio{Parametros: []string{"estado", "ano_inicio", "ano_fim", "email"}}
+	years := Relatorio{Parametros: []string{"estado", "ano_inicio", "ano_fim"}}
 	if !years.UsesYears() {
 		t.Fatal("ano_inicio parametrized report should use years")
 	}

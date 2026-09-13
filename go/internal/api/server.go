@@ -1,14 +1,19 @@
 // Package api mirrors src/main.py: the HTTP surface of the Enceladus API.
+//
+// Progress push works without email: clients subscribe to
+// GET /relatorios/eventos (Server-Sent Events) and fall back to polling
+// GET /relatorios/processados. Finished PDFs are served from the report
+// store (S3 bucket when configured), so repeat submissions reuse the file.
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -20,6 +25,7 @@ import (
 	"github.com/rodrinac/enceladus/go/internal/jobstatus"
 	"github.com/rodrinac/enceladus/go/internal/processed"
 	"github.com/rodrinac/enceladus/go/internal/reports"
+	"github.com/rodrinac/enceladus/go/internal/reportstore"
 	"github.com/rodrinac/enceladus/go/internal/settings"
 	"github.com/rodrinac/enceladus/go/internal/store"
 )
@@ -31,22 +37,24 @@ const (
 )
 
 var (
-	anoRegex = regexp.MustCompile(`^\d{4}$`)
-	dataRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	anoRegex      = regexp.MustCompile(`^\d{4}$`)
+	dataRegex     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	downloadRegex = regexp.MustCompile(`^[A-Z]{2}(-[A-Z]{2})*\.\d{4}(-\d{2}-\d{2})?\.\d{4}(-\d{2}-\d{2})?\.pdf$`)
 )
 
 type Server struct {
 	Cfg      *config.Config
 	Settings settings.Settings
 	Store    store.DataStore
+	Reports  reportstore.Storage
 	Registry *jobstatus.Registry
 	Worker   *reports.Worker
 	MaxYear  string
 }
 
 func NewServer(cfg *config.Config, st settings.Settings, dataStore store.DataStore,
-	registry *jobstatus.Registry, worker *reports.Worker) *Server {
-	return &Server{Cfg: cfg, Settings: st, Store: dataStore, Registry: registry, Worker: worker}
+	storage reportstore.Storage, registry *jobstatus.Registry, worker *reports.Worker) *Server {
+	return &Server{Cfg: cfg, Settings: st, Store: dataStore, Reports: storage, Registry: registry, Worker: worker}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -61,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /config/relatorios", s.relatoriosDisponiveis)
 
 	mux.HandleFunc("GET /relatorios/processados", s.processados)
+	mux.HandleFunc("GET /relatorios/eventos", s.eventos)
 
 	mux.HandleFunc("GET /relatorios/queimaduras/densidade-municipal-por-periodo-geral/{path...}", s.downloadPDF(reportTypeGeral))
 	mux.HandleFunc("POST /relatorios/queimaduras/densidade-municipal-por-periodo-geral", s.postGeral)
@@ -97,13 +106,94 @@ func (s *Server) relatoriosDisponiveis(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) processados(w http.ResponseWriter, r *http.Request) {
-	items, err := processed.List(s.Cfg, s.Settings.ReportsDir, s.Store, s.Registry)
+	items, err := processed.List(s.Cfg, s.Reports, s.Store, s.Registry)
 	if err != nil {
 		slog.Error("falha ao listar relatórios processados", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"mensagem": "Não foi possível listar os relatórios."})
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+// eventos streams the processed list over Server-Sent Events so browsers get
+// push updates without email. Clients should fall back to polling
+// /relatorios/processados when EventSource is unavailable.
+func (s *Server) eventos(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	if r.URL.Query().Get("snapshot") == "1" {
+		items, err := processed.List(s.Cfg, s.Reports, s.Store, s.Registry)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"mensagem": "Não foi possível listar os relatórios."})
+			return
+		}
+		raw, _ := json.Marshal(items)
+		w.Write([]byte("event: relatorios\n"))
+		w.Write([]byte("data: "))
+		w.Write(raw)
+		w.Write([]byte("\n\n"))
+		return
+	}
+
+	fl, canFlush := w.(http.Flusher)
+	send := func(payload string) bool {
+		if _, err := fmt.Fprintf(w, "event: relatorios\ndata: %s\n\n", payload); err != nil {
+			return false
+		}
+		if canFlush {
+			fl.Flush()
+		}
+		return true
+	}
+
+	// Initial snapshot so subscribers render immediately.
+	if items, err := processed.List(s.Cfg, s.Reports, s.Store, s.Registry); err == nil {
+		if raw, err := json.Marshal(items); err == nil {
+			if !send(string(raw)) {
+				return
+			}
+		}
+	} else if !send("[]") {
+		return
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	heartbeat := time.NewTicker(25 * time.Second)
+	defer heartbeat.Stop()
+	last := ""
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			items, err := processed.List(s.Cfg, s.Reports, s.Store, s.Registry)
+			if err != nil {
+				continue
+			}
+			raw, err := json.Marshal(items)
+			if err != nil {
+				continue
+			}
+			if string(raw) == last {
+				continue
+			}
+			last = string(raw)
+			if !send(last) {
+				return
+			}
+		case <-heartbeat.C:
+			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
+				return
+			}
+			if canFlush {
+				fl.Flush()
+			}
+		}
+	}
 }
 
 func (s *Server) reportName(reportID string) string {
@@ -193,21 +283,60 @@ func containsYear(years []int, value string) bool {
 	return false
 }
 
-func (s *Server) submit(w http.ResponseWriter, reportID string, states []string, start, end, email string) {
+// expectedOutput computes the deterministic file name, storage key and public
+// URI for a submission, so repeats hit the same object.
+func (s *Server) expectedOutput(reportID string, states []string, start, end string) (fileName, key, uri string) {
+	report, err := s.Cfg.RelatorioByID(reportID)
+	if err != nil {
+		return "", "", ""
+	}
+	expanded := states
+	for _, estado := range states {
+		if estado == "TODOS" {
+			expanded = s.Cfg.AllStateCodes()
+			break
+		}
+	}
+	fileName = strings.Join(expanded, "-") + "." + start + "." + end + ".pdf"
+	key = reportstore.KeyForReport(report.Path, fileName)
+	uri = reportstore.PublicURI(report.Path, fileName)
+	return fileName, key, uri
+}
+
+func (s *Server) submit(w http.ResponseWriter, r *http.Request, reportID string, states []string, start, end string) {
 	if err := s.validateSubmission(reportID, states, start, end); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"mensagem": err.Error()})
 		return
+	}
+	_, key, uri := s.expectedOutput(reportID, states, start, end)
+	if key != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		exists, err := s.Reports.Exists(ctx, key)
+		cancel()
+		if err == nil && exists {
+			// Already processed: reuse the stored file instead of
+			// re-running R. Clients learn about it via SSE/polling too.
+			writeJSON(w, http.StatusOK, map[string]any{
+				"id_requisicao": nil,
+				"status":        "succeeded",
+				"uri":           uri,
+				"reutilizado":   true,
+			})
+			return
+		}
 	}
 	idReq := uuid.New().String()
 	s.Registry.Register(idReq, s.reportName(reportID), states, start, end)
 
 	go s.processReport(idReq, reportID, reports.Request{
-		States: states, Start: start, End: end, Email: email, RequestID: idReq,
+		States: states, Start: start, End: end, RequestID: idReq,
 	})
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"destino":       nullableString(email),
 		"id_requisicao": idReq,
+		"status":        "queued",
+		"uri":           nil,
+		"reutilizado":   false,
 	})
 }
 
@@ -232,34 +361,47 @@ func (s *Server) processReport(idReq, reportID string, req reports.Request) {
 
 func (s *Server) postGeral(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	s.submit(w, reportTypeGeral, multiParam(query, "estado"),
-		query.Get("data_inicio"), query.Get("data_fim"), query.Get("email"))
+	s.submit(w, r, reportTypeGeral, multiParam(query, "estado"),
+		query.Get("data_inicio"), query.Get("data_fim"))
 }
 
 func (s *Server) postDensity(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	estado := query.Get("estado")
-	s.submit(w, reportTypeDensity, []string{estado},
-		query.Get("data_inicio"), query.Get("data_fim"), query.Get("email"))
+	s.submit(w, r, reportTypeDensity, []string{estado},
+		query.Get("data_inicio"), query.Get("data_fim"))
 }
 
 func (s *Server) postCasos(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	s.submit(w, reportTypeCasos, multiParam(query, "estado"),
-		query.Get("ano_inicio"), query.Get("ano_fim"), query.Get("email"))
+	s.submit(w, r, reportTypeCasos, multiParam(query, "estado"),
+		query.Get("ano_inicio"), query.Get("ano_fim"))
 }
 
-// downloadPDF serves a previously generated PDF, rejecting path traversal.
+// downloadPDF serves a previously generated PDF from the report store,
+// rejecting path traversal.
 func (s *Server) downloadPDF(reportID string) http.HandlerFunc {
-	folder := reportsHome(s.Settings.ReportsDir, reportID)
+	report, err := s.Cfg.RelatorioByID(reportID)
+	reportPath := ""
+	if err == nil {
+		reportPath = report.Path
+	} else {
+		reportPath = reportsHomeFallback(s.Settings.ReportsDir, reportID)
+	}
+	_ = reportPath
 	return func(w http.ResponseWriter, r *http.Request) {
 		pathTail := r.PathValue("path")
-		if !isSafePath(pathTail) {
+		// Only a single allowlisted PDF base name may vary; sub-paths are
+		// rejected to keep storage keys inside the report folder.
+		if !downloadRegex.MatchString(pathTail) || !isSafePath(pathTail) ||
+			strings.Contains(filepath.ToSlash(pathTail), "/") {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		filePath := filepath.Join(folder, filepath.FromSlash(pathTail))
-		data, err := os.ReadFile(filePath)
+		key := reportstore.KeyForReport(reportPath, filepath.ToSlash(pathTail))
+		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		data, err := s.Reports.Get(ctx, key)
 		if err != nil {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -297,6 +439,12 @@ func reportsHome(reportsDir, reportID string) string {
 	return reportsDir
 }
 
+// reportsHomeFallback is only used when the report ID is unknown; known IDs
+// resolve through the config path so storage keys stay canonical.
+func reportsHomeFallback(reportsDir, reportID string) string {
+	return reportsHome(reportsDir, reportID)
+}
+
 func isSafePath(value string) bool {
 	if value == "" || strings.Contains(value, "..") || strings.Contains(value, "\\") {
 		return false
@@ -306,13 +454,6 @@ func isSafePath(value string) bool {
 
 func multiParam(query url.Values, key string) []string {
 	return query[key]
-}
-
-func nullableString(value string) interface{} {
-	if value == "" {
-		return nil
-	}
-	return value
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload interface{}) {

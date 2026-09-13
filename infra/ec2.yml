@@ -26,14 +26,14 @@ Parameters:
     Type: String
     AllowedPattern: ^https://[A-Za-z0-9./_-]+$
     Description: GitHub Pages origin allowed to call the API
-  SesSender:
-    Type: String
-    Default: jose.rs.inacio@gmail.com
-    MinLength: 3
-    Description: Verified SES sender address or display-name address
-  SesConfigurationSet:
+  ReportsBucketName:
     Type: String
     Default: ""
+    Description: Existing S3 bucket for report PDFs; leave empty to create one
+  ReportsPrefix:
+    Type: String
+    Default: ""
+    Description: Optional key prefix inside the reports bucket (e.g. prod)
   IbgePopulationPeriod:
     Type: String
     Default: last%201
@@ -71,6 +71,7 @@ Parameters:
 
 Conditions:
   CreateGitHubOidcProvider: !Equals [!Ref GitHubOidcProviderArn, ""]
+  HasReportsBucketName: !Not [!Equals [!Ref ReportsBucketName, ""]]
 
 Resources:
   GitHubOidcProvider:
@@ -117,12 +118,17 @@ Resources:
                 Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource: !Ref RedisSecret
-              - Sid: SendEmail
+              - Sid: ReportBucketAccess
                 Effect: Allow
                 Action:
-                  - ses:SendEmail
-                  - ses:SendRawEmail
-                Resource: !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${ReportsBucket}/*
+              - Sid: ReportBucketList
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::${ReportsBucket}
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -183,8 +189,8 @@ Resources:
               IBGE_POPULATION_PERIOD=${IbgePopulationPeriod}
               REDIS_HOST=127.0.0.1
               REDIS_SECRET_ARN=${RedisSecret}
-              SES_CONFIGURATION_SET=${SesConfigurationSet}
-              SES_SENDER=${SesSender}
+              ENCELADUS_REPORTS_BUCKET=${ReportsBucket}
+              ENCELADUS_REPORTS_PREFIX=${ReportsPrefix}
               SOURCE_REF=main
               SOURCE_REPOSITORY=${GitHubRepository}
               EOF
@@ -238,6 +244,36 @@ Resources:
       Device: /dev/sdf
       InstanceId: !Ref Instance
       VolumeId: !Ref DataVolume
+
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Persists report PDFs across restarts and instance replacement
+        must:
+          - Retain through stack deletion and instance replacement
+          - Block public access
+        mutable: must-never-change
+    Properties:
+      BucketName: !If [HasReportsBucketName, !Ref ReportsBucketName, !Ref "AWS::NoValue"]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
 
   ElasticIp:
     Type: AWS::EC2::EIP
@@ -456,3 +492,6 @@ Outputs:
   GitHubDeployRoleArn:
     Description: Set this as the AWS_DEPLOY_ROLE_ANR GitHub production secret
     Value: !GetAtt GitHubDeployRole.Arn
+  ReportsBucket:
+    Description: S3 bucket holding generated report PDFs
+    Value: !Ref ReportsBucket

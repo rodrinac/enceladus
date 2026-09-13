@@ -35,11 +35,14 @@ export function reportDateGranularity(reportType: Pick<ReportType, "campos_data"
 }
 
 type ReportRequest = {
-  email: string;
   endDate: string;
   startDate: string;
   states: string[];
 };
+
+export type ReportSubmission =
+  | { id_requisicao: string; status: "queued"; uri: null; reutilizado: false }
+  | { id_requisicao: null; status: "succeeded"; uri: string; reutilizado: true };
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
 
@@ -84,7 +87,7 @@ export function getProcessedReports(signal?: AbortSignal): Promise<ProcessedRepo
 export async function requestReport(
   reportType: ReportType,
   reportRequest: ReportRequest,
-): Promise<{ destino: string; id_requisicao: string }> {
+): Promise<ReportSubmission> {
   const url = new URL(apiUrl(reportType.path));
   reportRequest.states.forEach((state) => url.searchParams.append("estado", state));
 
@@ -96,6 +99,22 @@ export async function requestReport(
     url.searchParams.set("data_fim", reportRequest.endDate);
   }
 
-  url.searchParams.set("email", reportRequest.email);
   return requestJson(url.toString(), { method: "POST" });
+}
+
+// subscribeToReports opens the SSE push stream (/relatorios/eventos) and
+// forwards snapshots. Returns an unsubscribe function. Callers should keep
+// polling getProcessedReports as a fallback when EventSource is unavailable.
+export function subscribeToReports(onReports: (reports: ProcessedReport[]) => void): () => void {
+  if (typeof EventSource === "undefined") return () => {};
+  const source = new EventSource(apiUrl("/relatorios/eventos"));
+  const handler = (event: MessageEvent) => {
+    try {
+      onReports(JSON.parse(event.data) as ProcessedReport[]);
+    } catch {
+      // Ignore malformed pushes; polling will repair the view.
+    }
+  };
+  source.addEventListener("relatorios", handler as EventListener);
+  return () => source.close();
 }
