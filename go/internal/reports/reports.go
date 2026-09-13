@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -85,6 +86,25 @@ func (w *Worker) Exists(ctx context.Context, reportPath, fileName string) bool {
 	return exists
 }
 
+// safeFileName mirrors the deterministic names built from validated states
+// and dates (e.g. AC-CE.2022-01-01.2022-12-31.pdf or AC.2021.2021.pdf). It is
+// the second layer (behind validateSubmission) ensuring the local R working
+// files only ever use expected names.
+var safeFileName = regexp.MustCompile(`^[A-Z]{2}(-[A-Z]{2})*\.\d{4}(-\d{2}-\d{2})?\.\d{4}(-\d{2}-\d{2})?\.pdf$`)
+
+// checkLocalPath rejects unexpected file names and paths escaping ReportsDir
+// before the R working files are touched.
+func (w *Worker) checkLocalPath(filePath string) error {
+	if !safeFileName.MatchString(filepath.Base(filePath)) {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	rel, err := filepath.Rel(w.ReportsDir, filePath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	return nil
+}
+
 // generate runs the R script unless the PDF is already stored. It returns
 // (generated, reused, exitCode, output): reused is true when the file already
 // existed and R was skipped.
@@ -92,7 +112,10 @@ func (w *Worker) generate(ctx context.Context, key, filePath, workingPath, scrip
 	if exists, err := w.Reports.Exists(ctx, key); err == nil && exists {
 		return false, true, 0, "", nil
 	}
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+	if err := w.checkLocalPath(filePath); err != nil {
+		return false, false, 0, "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil { // lgtm[go/path-injection] filePath is allowlisted by checkLocalPath and contained in ReportsDir
 		return false, false, 0, "", err
 	}
 	if err := os.MkdirAll(workingPath, 0o755); err != nil {
@@ -104,7 +127,7 @@ func (w *Worker) generate(ctx context.Context, key, filePath, workingPath, scrip
 	if code != 0 {
 		return true, false, code, output, nil
 	}
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // lgtm[go/path-injection] filePath is allowlisted by checkLocalPath and contained in ReportsDir
 	if err != nil {
 		return true, false, code, output, err
 	}

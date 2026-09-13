@@ -7,9 +7,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -44,17 +46,50 @@ func PublicURI(reportPath, fileName string) string {
 	return strings.TrimSuffix(reportPath, "/") + "/" + fileName
 }
 
+// safeKeySegment allows only the characters report keys can contain. Keys
+// are derived from validated states and dates, and this allowlist is the
+// second layer (behind validateSubmission) ensuring filesystem sinks only
+// ever see expected names.
+var safeKeySegment = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// cleanKey rejects absolute paths, ".", ".." and unexpected characters, so a
+// key derived from request values can never escape the store directory.
+func cleanKey(key string) (string, error) {
+	if key == "" || strings.HasPrefix(key, "/") {
+		return "", fmt.Errorf("chave de relatório inválida")
+	}
+	for _, segment := range strings.Split(key, "/") {
+		if segment == "" || segment == "." || segment == ".." || !safeKeySegment.MatchString(segment) {
+			return "", fmt.Errorf("chave de relatório inválida")
+		}
+	}
+	return key, nil
+}
+
 // Local keeps PDFs under Dir using the same relative layout as the keys.
 type Local struct {
 	Dir string
 }
 
-func (l *Local) path(key string) string {
-	return filepath.Join(l.Dir, filepath.FromSlash(key))
+func (l *Local) path(key string) (string, error) {
+	clean, err := cleanKey(key)
+	if err != nil {
+		return "", err
+	}
+	joined := filepath.Join(l.Dir, filepath.FromSlash(clean))
+	rel, err := filepath.Rel(l.Dir, joined)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("chave de relatório inválida")
+	}
+	return joined, nil
 }
 
 func (l *Local) Exists(_ context.Context, key string) (bool, error) {
-	_, err := os.Stat(l.path(key))
+	p, err := l.path(key)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(p) // lgtm[go/path-injection] p is allowlisted by cleanKey and contained in Dir by path
 	if err == nil {
 		return true, nil
 	}
@@ -65,19 +100,29 @@ func (l *Local) Exists(_ context.Context, key string) (bool, error) {
 }
 
 func (l *Local) Get(_ context.Context, key string) ([]byte, error) {
-	return os.ReadFile(l.path(key))
+	p, err := l.path(key)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(p) // lgtm[go/path-injection] p is allowlisted by cleanKey and contained in Dir by path
 }
 
 func (l *Local) Put(_ context.Context, key string, data []byte, _ string) error {
-	path := l.path(key)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	p, err := l.path(key)
+	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil { // lgtm[go/path-injection] p is allowlisted by cleanKey and contained in Dir by path
+		return err
+	}
+	return os.WriteFile(p, data, 0o644) // lgtm[go/path-injection] p is allowlisted by cleanKey and contained in Dir by path
 }
 
 func (l *Local) List(_ context.Context, prefix string) ([]string, error) {
-	base := l.path(prefix)
+	base, err := l.path(prefix)
+	if err != nil {
+		return nil, err
+	}
 	matches, err := filepath.Glob(filepath.Join(base, "*.pdf"))
 	if err != nil {
 		return nil, err
