@@ -42,6 +42,13 @@ var (
 	downloadRegex = regexp.MustCompile(`^[A-Z]{2}(-[A-Z]{2})*\.\d{4}(-\d{2}-\d{2})?\.\d{4}(-\d{2}-\d{2})?\.pdf$`)
 )
 
+// sseMaxStreamDuration bounds an event stream so it always terminates before
+// the managed proxy chain gives up: the Lambda proxy buffers the whole
+// response and times out after 29s, so an endless stream would surface in the
+// browser as a 500 instead of push updates. EventSource reconnects on close
+// and receives a fresh snapshot, so a bounded stream behaves like push.
+var sseMaxStreamDuration = 20 * time.Second
+
 type Server struct {
 	Cfg      *config.Config
 	Settings settings.Settings
@@ -149,25 +156,39 @@ func (s *Server) eventos(w http.ResponseWriter, r *http.Request) {
 		return true
 	}
 
+	// last tracks the newest payload already pushed, seeded with the
+	// initial snapshot so an unchanged state holds the stream open
+	// instead of echoing the snapshot on the first tick.
+	last := ""
+
 	// Initial snapshot so subscribers render immediately.
 	if items, err := processed.List(s.Cfg, s.Reports, s.Store, s.Registry); err == nil {
 		if raw, err := json.Marshal(items); err == nil {
-			if !send(string(raw)) {
+			last = string(raw)
+			if !send(last) {
 				return
 			}
 		}
-	} else if !send("[]") {
-		return
+	} else {
+		last = "[]"
+		if !send(last) {
+			return
+		}
 	}
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	heartbeat := time.NewTicker(25 * time.Second)
 	defer heartbeat.Stop()
-	last := ""
+	streamDeadline := time.NewTimer(sseMaxStreamDuration)
+	defer streamDeadline.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-streamDeadline.C:
+			// Close the stream before the proxy's timeout so the client
+			// reconnects for a fresh snapshot instead of seeing a 500.
 			return
 		case <-ticker.C:
 			items, err := processed.List(s.Cfg, s.Reports, s.Store, s.Registry)
@@ -185,6 +206,11 @@ func (s *Server) eventos(w http.ResponseWriter, r *http.Request) {
 			if !send(last) {
 				return
 			}
+			// End the stream after the first change: the buffering proxy
+			// only delivers the body once the handler returns, so holding
+			// the stream open would delay this update by up to the
+			// deadline above. The client reconnects immediately.
+			return
 		case <-heartbeat.C:
 			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
 				return

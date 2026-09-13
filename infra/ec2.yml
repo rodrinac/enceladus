@@ -380,6 +380,16 @@ Resources:
                   response = urllib.request.urlopen(request, timeout=28)
               except urllib.error.HTTPError as error:
                   response = error
+              except urllib.error.URLError:
+                  # Backend unreachable (deploy restart, upstream timeout):
+                  # report a 502 instead of crashing the Lambda into a bare
+                  # 500, so EventSource clients simply retry.
+                  return {
+                      "statusCode": 502,
+                      "headers": {"content-type": "application/json"},
+                      "body": '{"mensagem":"A API está temporariamente indisponível."}',
+                      "isBase64Encoded": False,
+                  }
 
               response_body = response.read()
               response_headers = {

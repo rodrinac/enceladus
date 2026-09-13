@@ -297,6 +297,32 @@ func TestEventosStreamsSSE(t *testing.T) {
 	}
 }
 
+func TestEventosStreamEndsBeforeProxyTimeout(t *testing.T) {
+	server, _, _ := newTestEnv(t)
+	previous := sseMaxStreamDuration
+	sseMaxStreamDuration = 150 * time.Millisecond
+	defer func() { sseMaxStreamDuration = previous }()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		server.Handler().ServeHTTP(recorder, httptest.NewRequest("GET", "/relatorios/eventos", nil))
+		done <- recorder
+	}()
+
+	select {
+	case recorder := <-done:
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("unexpected status: %d", recorder.Code)
+		}
+		if !strings.Contains(recorder.Body.String(), "event: relatorios") {
+			t.Fatalf("expected SSE relatorios event, got %q", recorder.Body.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("event stream did not terminate before the proxy timeout")
+	}
+}
+
 func TestFailedReportMarksJob(t *testing.T) {
 	server, _, _ := newTestEnv(t)
 	// Point the runner at a script that always fails.
