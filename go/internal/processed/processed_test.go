@@ -1,12 +1,12 @@
 package processed
 
 import (
-	"os"
-	"path/filepath"
+	"context"
 	"testing"
 
 	"github.com/rodrinac/enceladus/go/internal/config"
 	"github.com/rodrinac/enceladus/go/internal/jobstatus"
+	"github.com/rodrinac/enceladus/go/internal/reportstore"
 )
 
 type fakeStore struct{ dates map[string]string }
@@ -36,23 +36,14 @@ func testConfig() *config.Config {
 }
 
 func TestList(t *testing.T) {
-	reportsDir := t.TempDir()
-	geral := filepath.Join(reportsDir, "queimaduras", "densidade-municipal-por-periodo-geral")
-	casos := filepath.Join(reportsDir, "queimaduras", "casos-mensais-por-municipio-por-estado")
-	if err := os.MkdirAll(geral, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(casos, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	pdfPaths := []string{
-		filepath.Join(geral, "CE.2020.2022.pdf"),
-		filepath.Join(geral, "CE-BA.2020.2022.pdf"),
-		filepath.Join(casos, "RN.2021.2021.pdf"),
-	}
-	for _, path := range pdfPaths {
-		if err := os.WriteFile(path, []byte("%PDF"), 0o644); err != nil {
+	ctx := context.Background()
+	mem := reportstore.NewMemory()
+	for _, key := range []string{
+		"queimaduras/densidade-municipal-por-periodo-geral/CE.2020.2022.pdf",
+		"queimaduras/densidade-municipal-por-periodo-geral/CE-BA.2020.2022.pdf",
+		"queimaduras/casos-mensais-por-municipio-por-estado/RN.2021.2021.pdf",
+	} {
+		if err := mem.Put(ctx, key, []byte("%PDF"), "application/pdf"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -64,7 +55,7 @@ func TestList(t *testing.T) {
 	registry := jobstatus.NewRegistry()
 	registry.Register("req-1", "Densidade municipal por período", []string{"RN"}, "2020", "2022")
 
-	items, err := List(testConfig(), reportsDir, store, registry)
+	items, err := List(testConfig(), mem, store, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,13 +90,10 @@ func TestList(t *testing.T) {
 }
 
 func TestListSortsNewestFirst(t *testing.T) {
-	reportsDir := t.TempDir()
-	folder := filepath.Join(reportsDir, "queimaduras", "densidade-municipal-por-periodo-geral")
-	if err := os.MkdirAll(folder, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	ctx := context.Background()
+	mem := reportstore.NewMemory()
 	for _, base := range []string{"CE.2020.2021.pdf", "CE.2020.2022.pdf"} {
-		if err := os.WriteFile(filepath.Join(folder, base), []byte("%PDF"), 0o644); err != nil {
+		if err := mem.Put(ctx, "queimaduras/densidade-municipal-por-periodo-geral/"+base, []byte("%PDF"), "application/pdf"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -114,7 +102,7 @@ func TestListSortsNewestFirst(t *testing.T) {
 		"dataProcessamento.DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL.CE.2020.2022.pdf": "10/10/2025 12:00:01",
 	}}
 
-	items, err := List(testConfig(), reportsDir, store, jobstatus.NewRegistry())
+	items, err := List(testConfig(), mem, store, jobstatus.NewRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,12 +129,8 @@ func TestParseDate(t *testing.T) {
 }
 
 func TestListDedupesJobOncePDFExists(t *testing.T) {
-	reportsDir := t.TempDir()
-	folder := filepath.Join(reportsDir, "queimaduras", "densidade-municipal-por-periodo-geral")
-	if err := os.MkdirAll(folder, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(folder, "DF-SP.2023.2024.pdf"), []byte("%PDF"), 0o644); err != nil {
+	mem := reportstore.NewMemory()
+	if err := mem.Put(context.Background(), "queimaduras/densidade-municipal-por-periodo-geral/DF-SP.2023.2024.pdf", []byte("%PDF"), "application/pdf"); err != nil {
 		t.Fatal(err)
 	}
 	store := &fakeStore{dates: map[string]string{
@@ -156,7 +140,7 @@ func TestListDedupesJobOncePDFExists(t *testing.T) {
 	registry.Register("req-dupe", "Densidade municipal por período", []string{"DF", "SP"}, "2023", "2024")
 	registry.MarkFailed("req-dupe")
 
-	items, err := List(testConfig(), reportsDir, store, registry)
+	items, err := List(testConfig(), mem, store, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,17 +156,13 @@ func TestListDedupesJobOncePDFExists(t *testing.T) {
 }
 
 func TestListKeepsJobWhenPDFMissing(t *testing.T) {
-	reportsDir := t.TempDir()
-	folder := filepath.Join(reportsDir, "queimaduras", "densidade-municipal-por-periodo-geral")
-	if err := os.MkdirAll(folder, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mem := reportstore.NewMemory()
 	store := &fakeStore{dates: map[string]string{}}
 	registry := jobstatus.NewRegistry()
 	registry.Register("req-live", "Densidade municipal por período", []string{"DF", "SP"}, "2023", "2024")
 	registry.MarkRunning("req-live")
 
-	items, err := List(testConfig(), reportsDir, store, registry)
+	items, err := List(testConfig(), mem, store, registry)
 	if err != nil {
 		t.Fatal(err)
 	}

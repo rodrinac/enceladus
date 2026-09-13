@@ -11,7 +11,7 @@ no Docker, container registry, or SSH.
 ## Prerequisites
 
 - An AWS account with a VPC and public subnet in `eu-west-1`.
-- A verified Amazon SES identity in `eu-west-1`.
+- An S3 bucket for report PDFs (created by the stack as `ReportsBucket` unless `ReportsBucketName` points at an existing one).
 - This repository pushed to GitHub before bootstrapping the stack.
 
 ## Provision infrastructure
@@ -30,8 +30,7 @@ Validate and deploy from an authenticated operator workstation:
       --parameter-overrides \
         VpcId=vpc-xxxxxxxx \
         PublicSubnetId=subnet-xxxxxxxx \
-        CorsOrigin=https://rodrinac.github.io \
-        SesSender=jose.rs.inacio@gmail.com
+        CorsOrigin=https://rodrinac.github.io
 
 If the account already has the GitHub Actions OIDC provider, also pass its ARN as
 `GitHubOidcProviderArn`.
@@ -42,9 +41,10 @@ first boot installs Nix, clones the repository to `/opt/enceladus`, runs
 [`deploy/bootstrap.sh`](bootstrap.sh) and builds the release closure from the local
 flake before starting the services.
 
-New SES accounts begin in the sandbox. Verify the sender from Amazon's email and request
-production access before sending reports to arbitrary recipients. A configuration set is
-optional; leave `SesConfigurationSet` empty unless one already exists.
+Report PDFs persist in the `ReportsBucket` (versioned, AES-256) instead of only on the
+host disk, so repeat submissions reuse the stored file and history survives restarts.
+Pass `ReportsBucketName` to reuse an existing bucket, and `ReportsPrefix` to namespace
+keys per environment.
 
 ## Configure GitHub
 
@@ -60,7 +60,7 @@ the `production` environment makes API releases manual-approval deployments.
 
 ## First and subsequent releases
 
-Run the `Deploy API to EC2` workflow manually after the GitHub variables and SES identity
+Run the `Deploy API to EC2` workflow manually after the GitHub variables
 are ready. Later merges to `main` deploy automatically when API-related paths change. The
 workflow invokes `deploy/deploy.sh` on the host through Systems Manager; the script
 refreshes the `/opt/enceladus` checkout, rebuilds the flake outputs, feeds the runtime

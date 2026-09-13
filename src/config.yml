@@ -92,7 +92,6 @@ relatorios:
       - estado
       - data_inicio
       - data_fim
-      - email
   - id: DENSIDADE_MUNICIPAL_POR_PERIODO
     nome: Densidade Municipal por Período
     path: '/relatorios/queimaduras/densidade-municipal-por-periodo'
@@ -102,7 +101,6 @@ relatorios:
       - estado
       - data_inicio
       - data_fim
-      - email
   - id: CASOS_MENSAIS_POR_MUNICIPIO_POR_ESTADO
     nome: Casos Mensais por Município por Estado
     path: '/relatorios/queimaduras/casos-mensais-por-municipio-por-estado'
@@ -113,4 +111,3 @@ relatorios:
       - estado
       - ano_inicio
       - ano_fim
-      - email

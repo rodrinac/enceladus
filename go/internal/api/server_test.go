@@ -14,6 +14,7 @@ import (
 	"github.com/rodrinac/enceladus/go/internal/config"
 	"github.com/rodrinac/enceladus/go/internal/jobstatus"
 	"github.com/rodrinac/enceladus/go/internal/reports"
+	"github.com/rodrinac/enceladus/go/internal/reportstore"
 	"github.com/rodrinac/enceladus/go/internal/rreport"
 	"github.com/rodrinac/enceladus/go/internal/settings"
 )
@@ -40,28 +41,11 @@ func (f *fakeStore) Dates() (map[string]string, error) {
 	return out, nil
 }
 
-type emailLog struct {
-	mu               sync.Mutex
-	to, subject      string
-	fileName         string
-	attachmentLength int
-}
-
-func (e *emailLog) send(to, subject, fileName string, attachment []byte) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.to = to
-	e.subject = subject
-	e.fileName = fileName
-	e.attachmentLength = len(attachment)
-	return nil
-}
-
-func newTestEnv(t *testing.T) (*Server, *fakeStore, *emailLog) {
+func newTestEnv(t *testing.T) (*Server, *fakeStore, *reportstore.Memory) {
 	t.Helper()
 	reportsDir := t.TempDir()
 	store := &fakeStore{dates: map[string]string{}}
-	emailLog := &emailLog{}
+	mem := reportstore.NewMemory()
 
 	cfg := &config.Config{
 		AnosFromRange: true,
@@ -79,7 +63,7 @@ func newTestEnv(t *testing.T) (*Server, *fakeStore, *emailLog) {
 				MultiplosEstados: true,
 				ColunasMensais:   true,
 				CamposData:       []string{"MM", "yyyy"},
-				Parametros:       []string{"estado", "data_inicio", "data_fim", "email"},
+				Parametros:       []string{"estado", "data_inicio", "data_fim"},
 			},
 			{
 				ID:               reportTypeDensity,
@@ -87,7 +71,7 @@ func newTestEnv(t *testing.T) (*Server, *fakeStore, *emailLog) {
 				Path:             "/relatorios/queimaduras/densidade-municipal-por-periodo",
 				MultiplosEstados: false,
 				CamposData:       []string{"dd", "MM", "yyyy"},
-				Parametros:       []string{"estado", "data_inicio", "data_fim", "email"},
+				Parametros:       []string{"estado", "data_inicio", "data_fim"},
 			},
 			{
 				ID:               reportTypeCasos,
@@ -96,7 +80,7 @@ func newTestEnv(t *testing.T) (*Server, *fakeStore, *emailLog) {
 				MultiplosEstados: true,
 				ColunasMensais:   true,
 				CamposData:       []string{"yyyy"},
-				Parametros:       []string{"estado", "ano_inicio", "ano_fim", "email"},
+				Parametros:       []string{"estado", "ano_inicio", "ano_fim"},
 			},
 		},
 	}
@@ -105,10 +89,10 @@ func newTestEnv(t *testing.T) (*Server, *fakeStore, *emailLog) {
 
 	scriptPath := writeFakeScript(t)
 	runner := &rreport.Runner{SourceRoot: reportsDir, RscriptsDir: reportsDir, ScriptBin: scriptPath}
-	worker := reports.NewWorker(cfg, reportsDir, store, runner, emailLog.send)
+	worker := reports.NewWorker(cfg, reportsDir, store, mem, runner)
 	registry := jobstatus.NewRegistry()
 
-	return NewServer(cfg, st, store, registry, worker), store, emailLog
+	return NewServer(cfg, st, store, mem, registry, worker), store, mem
 }
 
 func writeFakeScript(t *testing.T) string {
@@ -204,9 +188,9 @@ func TestProcessadosEmpty(t *testing.T) {
 }
 
 func TestSubmitGeral(t *testing.T) {
-	server, store, mail := newTestEnv(t)
+	server, store, mem := newTestEnv(t)
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo-geral" +
-		"?estado=AC&estado=CE&data_inicio=2022-01-01&data_fim=2022-12-31&email=a@b.co"
+		"?estado=AC&estado=CE&data_inicio=2022-01-01&data_fim=2022-12-31"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d, body %s", recorder.Code, recorder.Body.String())
@@ -215,12 +199,12 @@ func TestSubmitGeral(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &submit); err != nil {
 		t.Fatal(err)
 	}
-	if submit["destino"] != "a@b.co" {
-		t.Fatalf("unexpected destino: %+v", submit)
-	}
 	idReq, _ := submit["id_requisicao"].(string)
 	if idReq == "" {
 		t.Fatalf("missing id_requisicao: %+v", submit)
+	}
+	if submit["reutilizado"] != false {
+		t.Fatalf("expected reutilizado=false, got %+v", submit)
 	}
 
 	waitFor(t, 3*time.Second, func() bool {
@@ -235,40 +219,27 @@ func TestSubmitGeral(t *testing.T) {
 		t.Fatal("processing date was not saved to store")
 	}
 
-	mail.mu.Lock()
-	defer mail.mu.Unlock()
-	if mail.to != "a@b.co" || mail.fileName != "relatorio_densidade_municipal.pdf" {
-		t.Fatalf("unexpected email: %+v", mail)
-	}
-	if mail.subject != "Relatório de densidade municipal por período - AC, CE, entre 2022-01-01 e 2022-12-31" {
-		t.Fatalf("unexpected subject: %q", mail.subject)
-	}
-	if mail.attachmentLength == 0 {
-		t.Fatal("expected a non-empty attachment")
+	if exists, _ := mem.Exists(t.Context(), "queimaduras/densidade-municipal-por-periodo-geral/"+fileName); !exists {
+		t.Fatal("expected PDF in report store")
 	}
 }
 
 func TestSubmitCasos(t *testing.T) {
-	server, _, mail := newTestEnv(t)
+	server, _, mem := newTestEnv(t)
 	target := "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado" +
-		"?estado=AC&ano_inicio=2021&ano_fim=2021&email=a@b.co"
+		"?estado=AC&ano_inicio=2021&ano_fim=2021"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d, body %s", recorder.Code, recorder.Body.String())
 	}
 	waitFor(t, 3*time.Second, func() bool { return len(server.Registry.List()) == 0 })
 
-	mail.mu.Lock()
-	defer mail.mu.Unlock()
-	if mail.subject != "Diagrama de distribuição do local de falecimento para AC, em 2021" {
-		t.Fatalf("unexpected subject: %q", mail.subject)
-	}
-	if mail.fileName != "relatorio.pdf" {
-		t.Fatalf("unexpected attachment: %q", mail.fileName)
+	if exists, _ := mem.Exists(t.Context(), "queimaduras/casos-mensais-por-municipio-por-estado/AC.2021.2021.pdf"); !exists {
+		t.Fatal("expected PDF in report store")
 	}
 }
 
-func TestSubmitWithoutEmailReturnsNullDestino(t *testing.T) {
+func TestSubmitQueuesWithoutContact(t *testing.T) {
 	server, _, _ := newTestEnv(t)
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo" +
 		"?estado=CE&data_inicio=2021-01-01&data_fim=2022-12-31"
@@ -280,10 +251,50 @@ func TestSubmitWithoutEmailReturnsNullDestino(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &submit); err != nil {
 		t.Fatal(err)
 	}
-	if submit["destino"] != nil {
-		t.Fatalf("expected null destino, got %+v", submit["destino"])
+	if submit["id_requisicao"] == nil || submit["id_requisicao"] == "" {
+		t.Fatalf("expected id_requisicao, got %+v", submit)
+	}
+	if _, ok := submit["destino"]; ok {
+		t.Fatalf("email field should be gone, got %+v", submit)
 	}
 	waitFor(t, 3*time.Second, func() bool { return len(server.Registry.List()) == 0 })
+}
+
+func TestSubmitReusesStoredReport(t *testing.T) {
+	server, _, mem := newTestEnv(t)
+	if err := mem.Put(t.Context(), "queimaduras/densidade-municipal-por-periodo/CE.2021-01-01.2022-12-31.pdf", []byte("%PDF-1.5"), "application/pdf"); err != nil {
+		t.Fatal(err)
+	}
+	target := "/relatorios/queimaduras/densidade-municipal-por-periodo" +
+		"?estado=CE&data_inicio=2021-01-01&data_fim=2022-12-31"
+	recorder := server.request(t, "POST", target, nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 reuse, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var submit map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &submit); err != nil {
+		t.Fatal(err)
+	}
+	if submit["reutilizado"] != true {
+		t.Fatalf("expected reutilizado=true, got %+v", submit)
+	}
+	if submit["uri"] == nil || submit["uri"] == "" {
+		t.Fatalf("expected uri, got %+v", submit)
+	}
+	if len(server.Registry.List()) != 0 {
+		t.Fatal("reuse should not queue a job")
+	}
+}
+
+func TestEventosStreamsSSE(t *testing.T) {
+	server, _, _ := newTestEnv(t)
+	recorder := server.request(t, "GET", "/relatorios/eventos?snapshot=1", nil)
+	if ct := recorder.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("unexpected content type: %q", ct)
+	}
+	if !strings.Contains(recorder.Body.String(), "event: relatorios") {
+		t.Fatalf("expected SSE relatorios event, got %q", recorder.Body.String())
+	}
 }
 
 func TestFailedReportMarksJob(t *testing.T) {
@@ -296,7 +307,7 @@ func TestFailedReportMarksJob(t *testing.T) {
 	server.Worker.Runner.ScriptBin = failureScript
 
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo" +
-		"?estado=CE&data_inicio=2021-01-01&data_fim=2022-12-31&email=a@b.co"
+		"?estado=CE&data_inicio=2021-01-01&data_fim=2022-12-31"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d", recorder.Code)
@@ -352,12 +363,8 @@ func TestCORSRestrictedOrigin(t *testing.T) {
 }
 
 func TestDownloadPDF(t *testing.T) {
-	server, _, _ := newTestEnv(t)
-	pdfPath := filepath.Join(server.Settings.ReportsDir, "queimaduras", "densidade-municipal-por-periodo")
-	if err := os.MkdirAll(pdfPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pdfPath, "CE.2020.2022.pdf"), []byte("%PDF-1.5"), 0o644); err != nil {
+	server, _, mem := newTestEnv(t)
+	if err := mem.Put(t.Context(), "queimaduras/densidade-municipal-por-periodo/CE.2020.2022.pdf", []byte("%PDF-1.5"), "application/pdf"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,24 +409,22 @@ func TestRunningJobVisibleInProcessados(t *testing.T) {
 }
 
 func TestGeralTODOSExpandsToAllStates(t *testing.T) {
-	server, store, mail := newTestEnv(t)
+	server, store, mem := newTestEnv(t)
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo-geral" +
-		"?estado=TODOS&data_inicio=2022-01-01&data_fim=2022-12-31&email=a@b.co"
+		"?estado=TODOS&data_inicio=2022-01-01&data_fim=2022-12-31"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d", recorder.Code)
 	}
 	waitFor(t, 3*time.Second, func() bool { return len(server.Registry.List()) == 0 })
 
-	mail.mu.Lock()
-	defer mail.mu.Unlock()
-	if mail.subject != "Relatório de densidade municipal por período - AC, CE, entre 2022-01-01 e 2022-12-31" {
-		t.Fatalf("unexpected subject: %q", mail.subject)
-	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if _, ok := store.dates["dataProcessamento.DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL.AC-CE.2022-01-01.2022-12-31.pdf"]; !ok {
 		t.Fatalf("expected expansion to all states: %v", store.dates)
+	}
+	if exists, _ := mem.Exists(t.Context(), "queimaduras/densidade-municipal-por-periodo-geral/AC-CE.2022-01-01.2022-12-31.pdf"); !exists {
+		t.Fatal("expected expanded PDF in report store")
 	}
 }
 
@@ -491,7 +496,7 @@ func TestSubmitRejectsTwoYearRangeForMonthlyColumns(t *testing.T) {
 func TestSubmitAcceptsMultiYearForDayGranularity(t *testing.T) {
 	server, _, _ := newTestEnv(t)
 	target := "/relatorios/queimaduras/densidade-municipal-por-periodo" +
-		"?estado=CE&data_inicio=2021-01-01&data_fim=2023-12-31&email=a@b.co"
+		"?estado=CE&data_inicio=2021-01-01&data_fim=2023-12-31"
 	recorder := server.request(t, "POST", target, nil)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("unexpected status: %d, body %s", recorder.Code, recorder.Body.String())

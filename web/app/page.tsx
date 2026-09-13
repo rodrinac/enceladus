@@ -20,6 +20,7 @@ import {
   ReportType,
   requestReport,
   StateOption,
+  subscribeToReports,
 } from "@/lib/api";
 
 type Configuration = {
@@ -50,7 +51,6 @@ export default function Home() {
   const [selectedStates, setSelectedStates] = useState<string[]>([]);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
@@ -105,10 +105,18 @@ export default function Home() {
         setReportsError("Não foi possível atualizar os relatórios processados.");
       })
       .finally(() => setReportsLoading(false));
+    // Push updates via SSE; the interval below stays as a fallback for
+    // browsers/proxies without EventSource support.
+    const unsubscribe = subscribeToReports((pushedReports) => {
+      setReports(pushedReports);
+      setReportsError(null);
+      setReportsLoading(false);
+    });
     const interval = window.setInterval(() => void refreshReports(), 10_000);
 
     return () => {
       controller.abort();
+      unsubscribe();
       window.clearInterval(interval);
     };
   }, [refreshReports]);
@@ -175,15 +183,21 @@ export default function Home() {
 
     try {
       const response = await requestReport(selectedReport, {
-        email,
         endDate,
         startDate,
         states: selectedStates,
       });
-      setNotice({
-        kind: "success",
-        message: `Relatório enviado para processamento. Código: ${response.id_requisicao}`,
-      });
+      if (response.reutilizado) {
+        setNotice({
+          kind: "success",
+          message: "Relatório já processado — download imediato disponível abaixo.",
+        });
+      } else {
+        setNotice({
+          kind: "success",
+          message: `Relatório enviado para processamento. Código: ${response.id_requisicao}`,
+        });
+      }
       void refreshReports();
     } catch {
       setNotice({ kind: "error", message: "Não foi possível solicitar o relatório." });
@@ -211,7 +225,7 @@ export default function Home() {
           <div className="mb-7">
             <p className="mb-2 text-sm font-bold text-latte-mauve">NOVO PEDIDO</p>
             <h2 className="text-2xl font-extrabold">Solicitar relatório</h2>
-            <p className="mt-2 text-latte-subtext0">Escolha o recorte dos dados e receba o PDF por e-mail.</p>
+            <p className="mt-2 text-latte-subtext0">Escolha o recorte dos dados e acompanhe o progresso aqui — avisamos quando o PDF estiver pronto.</p>
           </div>
 
           {configurationError ? (
@@ -328,10 +342,6 @@ export default function Home() {
                   </Field>
                 </div>
               )}
-
-              <Field label="E-mail" id="email">
-                <Input id="email" autoComplete="email" className="h-11" onChange={(event) => setEmail(event.target.value)} placeholder="pesquisador@exemplo.org" required type="email" value={email} />
-              </Field>
 
               {notice && <StatusMessage kind={notice.kind}>{notice.message}</StatusMessage>}
 

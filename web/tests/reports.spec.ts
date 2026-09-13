@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
     if (path in responses) {
       await route.fulfill({ json: responses[path] });
     } else if (route.request().method() === "POST") {
-      await route.fulfill({ status: 202, json: { id_requisicao: "test-request", destino: "test@example.invalid" } });
+      await route.fulfill({ status: 202, json: { id_requisicao: "test-request", status: "queued", uri: null, reutilizado: false } });
     } else {
       await route.fulfill({ status: 404 });
     }
@@ -38,13 +38,13 @@ test("submits dates after 2019 and preserves multiple/single state selection", a
   await page.getByLabel("Data inicial").fill("2024-03");
   await page.getByLabel("Data final").fill("2024-10");
   await expect(page.getByLabel("Data inicial")).toHaveAttribute("max", "2024-12");
-  await page.getByLabel("E-mail").fill("test@example.invalid");
   const submitted = page.waitForRequest((request) => request.method() === "POST");
   await page.getByRole("button", { name: "Processar relatório" }).click();
   const requestUrl = new URL((await submitted).url());
   expect(requestUrl.searchParams.getAll("estado")).toEqual(["DF", "MG"]);
   expect(requestUrl.searchParams.get("data_inicio")).toBe("2024-03-01");
   expect(requestUrl.searchParams.get("data_fim")).toBe("2024-10-01");
+  expect(requestUrl.searchParams.has("email")).toBe(false);
   await expect(page.getByRole("status")).toContainText("test-request");
 
   await page.getByLabel("Tipo de relatório").selectOption(reportTypes[1].id);
@@ -123,8 +123,31 @@ test("shows configuration and submission errors", async ({ page }) => {
   await page.getByRole("checkbox", { name: "Distrito Federal" }).check();
   await page.getByLabel("Data inicial").fill("2024-01");
   await page.getByLabel("Data final").fill("2024-12");
-  await page.getByLabel("E-mail").fill("test@example.invalid");
   await page.route("**/relatorios/queimaduras/**", (route) => route.fulfill({ status: 500 }));
   await page.getByRole("button", { name: "Processar relatório" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Não foi possível solicitar o relatório" })).toBeVisible();
+});
+
+test("shows immediate download when the report was already processed", async ({ page }) => {
+  await page.route("http://localhost:8000/**", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          id_requisicao: null,
+          status: "succeeded",
+          uri: "/relatorios/queimaduras/densidade-municipal-por-periodo-geral/DF-MG.2024-01-01.2024-12-31.pdf",
+          reutilizado: true,
+        },
+      });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto("/");
+  await page.getByRole("checkbox", { name: "Distrito Federal" }).check();
+  await page.getByLabel("Data inicial").fill("2024-03");
+  await page.getByLabel("Data final").fill("2024-10");
+  await page.getByRole("button", { name: "Processar relatório" }).click();
+  await expect(page.getByRole("status")).toContainText("download imediato");
 });

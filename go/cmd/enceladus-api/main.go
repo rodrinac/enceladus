@@ -14,14 +14,14 @@ import (
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ses"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/rodrinac/enceladus/go/internal/api"
 	"github.com/rodrinac/enceladus/go/internal/config"
-	"github.com/rodrinac/enceladus/go/internal/email"
 	"github.com/rodrinac/enceladus/go/internal/jobstatus"
 	"github.com/rodrinac/enceladus/go/internal/reports"
+	"github.com/rodrinac/enceladus/go/internal/reportstore"
 	"github.com/rodrinac/enceladus/go/internal/rreport"
 	"github.com/rodrinac/enceladus/go/internal/settings"
 	"github.com/rodrinac/enceladus/go/internal/store"
@@ -47,15 +47,21 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(st.SESRegion))
-	if err != nil {
-		slog.Error("falha ao configurar AWS", "error", err)
-		os.Exit(1)
-	}
-	sender := &email.SES{
-		Client:           ses.NewFromConfig(awsConfig),
-		ConfigurationSet: st.SESConfigurationSet,
-		SenderAddress:    st.SESSender,
+	var storage reportstore.Storage = &reportstore.Local{Dir: st.ReportsDir}
+	if st.ReportsBucket != "" {
+		awsConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(st.AWSRegion))
+		if err != nil {
+			slog.Error("falha ao configurar AWS", "error", err)
+			os.Exit(1)
+		}
+		storage = &reportstore.S3{
+			Client: s3.NewFromConfig(awsConfig),
+			Bucket: st.ReportsBucket,
+			Prefix: st.ReportsPrefix,
+		}
+		slog.Info("armazenamento de relatórios no S3", "bucket", st.ReportsBucket, "prefixo", st.ReportsPrefix)
+	} else {
+		slog.Info("armazenamento de relatórios local", "dir", st.ReportsDir)
 	}
 
 	redisClient := redis.NewClient(&redis.Options{
@@ -66,8 +72,8 @@ func main() {
 	dataStore := store.NewRedisStore(redisClient)
 	registry := jobstatus.NewRegistry()
 	runner := &rreport.Runner{SourceRoot: st.SourceRoot, RscriptsDir: st.RscriptsDir}
-	worker := reports.NewWorker(cfg, st.ReportsDir, dataStore, runner, sender.Send)
-	server := api.NewServer(cfg, st, dataStore, registry, worker)
+	worker := reports.NewWorker(cfg, st.ReportsDir, dataStore, storage, runner)
+	server := api.NewServer(cfg, st, dataStore, storage, registry, worker)
 
 	addr := st.Bind
 	if addr == "" {

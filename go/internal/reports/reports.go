@@ -1,15 +1,21 @@
 // Package reports mirrors the src/relatorios/* modules: it builds each report
-// by invoking the R scripts, records processing dates and emails the PDF.
+// by invoking the R scripts, persists the PDF in the report store (S3 bucket
+// when configured, local filesystem otherwise) and records processing dates.
+// Repeat submissions for an already stored report reuse the file instead of
+// re-running R.
 package reports
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rodrinac/enceladus/go/internal/config"
+	"github.com/rodrinac/enceladus/go/internal/reportstore"
 	"github.com/rodrinac/enceladus/go/internal/rreport"
 	"github.com/rodrinac/enceladus/go/internal/store"
 )
@@ -18,7 +24,6 @@ type Request struct {
 	States    []string
 	Start     string
 	End       string
-	Email     string
 	RequestID string
 }
 
@@ -26,13 +31,13 @@ type Worker struct {
 	Cfg        *config.Config
 	ReportsDir string
 	Store      store.DataStore
+	Reports    reportstore.Storage
 	Runner     *rreport.Runner
-	Send       func(to, subject, fileName string, attachment []byte) error
 }
 
 func NewWorker(cfg *config.Config, reportsDir string, dataStore store.DataStore,
-	runner *rreport.Runner, send func(to, subject, fileName string, attachment []byte) error) *Worker {
-	return &Worker{Cfg: cfg, ReportsDir: reportsDir, Store: dataStore, Runner: runner, Send: send}
+	storage reportstore.Storage, runner *rreport.Runner) *Worker {
+	return &Worker{Cfg: cfg, ReportsDir: reportsDir, Store: dataStore, Reports: storage, Runner: runner}
 }
 
 func formatIntervalo(inicio, fim string) string {
@@ -57,6 +62,11 @@ func reportHome(reportsDir, reportPath string) string {
 	return filepath.Join(reportsDir, subdir)
 }
 
+// storageKey returns the persistence key plus the public download URI.
+func storageKey(reportPath, fileName string) (string, string) {
+	return reportstore.KeyForReport(reportPath, fileName), reportstore.PublicURI(reportPath, fileName)
+}
+
 func (w *Worker) expandTodos(states []string) []string {
 	if contains(states, "TODOS") {
 		return w.Cfg.AllStateCodes()
@@ -64,36 +74,65 @@ func (w *Worker) expandTodos(states []string) []string {
 	return states
 }
 
-// generate returns (generated, exitCode, output). generated is false when the
-// PDF already exists; exitCode is meaningful only when generated is true.
-func (w *Worker) generate(filePath, workingPath, script string, args []string) (bool, int, string, error) {
-	if _, err := os.Stat(filePath); err == nil {
-		return false, 0, "", nil
+// Exists reports whether the finished PDF is already persisted.
+func (w *Worker) Exists(ctx context.Context, reportPath, fileName string) bool {
+	key, _ := storageKey(reportPath, fileName)
+	exists, err := w.Reports.Exists(ctx, key)
+	if err != nil {
+		slog.Warn("falha ao verificar relatório existente", "chave", key, "error", err)
+		return false
+	}
+	return exists
+}
+
+// generate runs the R script unless the PDF is already stored. It returns
+// (generated, reused, exitCode, output): reused is true when the file already
+// existed and R was skipped.
+func (w *Worker) generate(ctx context.Context, key, filePath, workingPath, script string, args []string) (bool, bool, int, string, error) {
+	if exists, err := w.Reports.Exists(ctx, key); err == nil && exists {
+		return false, true, 0, "", nil
+	}
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return false, false, 0, "", err
 	}
 	if err := os.MkdirAll(workingPath, 0o755); err != nil {
-		return false, 0, "", err
+		return false, false, 0, "", err
 	}
 	code, output := w.Runner.Run(script, args)
 	slog.Debug("Retorno da execução R", "script", script, "output", output)
 	slog.Info("Executou comando R", "script", script, "status", code)
-	return true, code, output, nil
+	if code != 0 {
+		return true, false, code, output, nil
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return true, false, code, output, err
+	}
+	if err := w.Reports.Put(ctx, key, data, "application/pdf"); err != nil {
+		return true, false, code, output, err
+	}
+	return true, false, code, output, nil
 }
 
 // DensidadeGeral mirrors relatorios.densidade_municipal_por_periodo_geral.
 func (w *Worker) DensidadeGeral(req Request) bool {
 	const idRelatorio = "DENSIDADE_MUNICIPAL_POR_PERIODO_GERAL"
+	const reportPath = "/relatorios/queimaduras/densidade-municipal-por-periodo-geral"
 	states := w.expandTodos(req.States)
 
 	slog.Info("Obtendo registros de queimaduras",
 		"estados", fmt.Sprint(states),
 		"intervalo", formatIntervalo(req.Start, req.End))
 
-	folder := reportHome(w.ReportsDir, "/relatorios/queimaduras/densidade-municipal-por-periodo-geral")
+	folder := reportHome(w.ReportsDir, reportPath)
 	fileName := strings.Join(states, "-") + "." + req.Start + "." + req.End + ".pdf"
+	key, _ := storageKey(reportPath, fileName)
 	filePath := filepath.Join(folder, fileName)
 	workingPath := filepath.Join(folder, req.RequestID)
 
-	generated, code, output, err := w.generate(filePath, workingPath,
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	generated, reused, code, output, err := w.generate(ctx, key, filePath, workingPath,
 		"densidade_municipal_por_periodo_geral.R",
 		[]string{strings.Join(states, ","), req.Start, req.End, filePath, workingPath})
 	if err != nil {
@@ -104,15 +143,17 @@ func (w *Worker) DensidadeGeral(req Request) bool {
 		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "saida", output)
 		return false
 	}
+	if reused {
+		slog.Info("Relatório reutilizado do armazenamento", "relatorio", idRelatorio, "chave", key)
+	}
 
-	subject := fmt.Sprintf("Relatório de densidade municipal por período - %s, %s",
-		strings.Join(states, ", "), formatIntervalo(req.Start, req.End))
-	return w.deliver(idRelatorio, fileName, filePath, workingPath, req, subject, "relatorio_densidade_municipal.pdf")
+	return w.deliver(ctx, idRelatorio, fileName, workingPath, req)
 }
 
 // Densidade mirrors relatorios.densidade_municipal_por_periodo (single state).
 func (w *Worker) Densidade(req Request) bool {
 	const idRelatorio = "DENSIDADE_MUNICIPAL_POR_PERIODO"
+	const reportPath = "/relatorios/queimaduras/densidade-municipal-por-periodo"
 	estado := ""
 	if len(req.States) > 0 {
 		estado = req.States[0]
@@ -122,12 +163,15 @@ func (w *Worker) Densidade(req Request) bool {
 		"estado", estado,
 		"intervalo", formatIntervalo(req.Start, req.End))
 
-	folder := reportHome(w.ReportsDir, "/relatorios/queimaduras/densidade-municipal-por-periodo")
+	folder := reportHome(w.ReportsDir, reportPath)
 	fileName := estado + "." + req.Start + "." + req.End + ".pdf"
+	key, _ := storageKey(reportPath, fileName)
 	filePath := filepath.Join(folder, fileName)
 	workingPath := filepath.Join(folder, req.RequestID)
 
-	generated, code, output, err := w.generate(filePath, workingPath, "densidade_municipal_por_periodo.R",
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	generated, reused, code, output, err := w.generate(ctx, key, filePath, workingPath, "densidade_municipal_por_periodo.R",
 		[]string{estado, req.Start, req.End, filePath, workingPath})
 	if err != nil {
 		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
@@ -137,26 +181,31 @@ func (w *Worker) Densidade(req Request) bool {
 		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "saida", output)
 		return false
 	}
+	if reused {
+		slog.Info("Relatório reutilizado do armazenamento", "relatorio", idRelatorio, "chave", key)
+	}
 
-	subject := fmt.Sprintf("Relatório de densidade municipal por período - %s, %s",
-		estado, formatIntervalo(req.Start, req.End))
-	return w.deliver(idRelatorio, fileName, filePath, workingPath, req, subject, "relatorio_densidade_municipal.pdf")
+	return w.deliver(ctx, idRelatorio, fileName, workingPath, req)
 }
 
 // CasosMensais mirrors relatorios.casos_mensais_por_municipio_por_estado.
 func (w *Worker) CasosMensais(req Request) bool {
 	const idRelatorio = "CASOS_MENSAIS_POR_MUNICIPIO_POR_ESTADO"
+	const reportPath = "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado"
 
 	slog.Info("Obtendo registros de queimaduras",
 		"estados", strings.Join(req.States, ", "),
 		"intervalo", formatIntervalo(req.Start, req.End))
 
-	folder := reportHome(w.ReportsDir, "/relatorios/queimaduras/casos-mensais-por-municipio-por-estado")
+	folder := reportHome(w.ReportsDir, reportPath)
 	fileName := strings.Join(req.States, "-") + "." + req.Start + "." + req.End + ".pdf"
+	key, _ := storageKey(reportPath, fileName)
 	filePath := filepath.Join(folder, fileName)
 	workingPath := filepath.Join(folder, req.RequestID)
 
-	generated, code, output, err := w.generate(filePath, workingPath, "casos_mensais_por_municipio_por_estado.R",
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	generated, reused, code, output, err := w.generate(ctx, key, filePath, workingPath, "casos_mensais_por_municipio_por_estado.R",
 		[]string{strings.Join(req.States, ","), req.Start, req.End, filePath, workingPath})
 	if err != nil {
 		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
@@ -166,35 +215,26 @@ func (w *Worker) CasosMensais(req Request) bool {
 		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "saida", output)
 		return false
 	}
+	if reused {
+		slog.Info("Relatório reutilizado do armazenamento", "relatorio", idRelatorio, "chave", key)
+	}
 
-	subject := fmt.Sprintf("Diagrama de distribuição do local de falecimento para %s, %s",
-		strings.Join(req.States, ", "), formatIntervalo(req.Start, req.End))
-	return w.deliver(idRelatorio, fileName, filePath, workingPath, req, subject, "relatorio.pdf")
+	return w.deliver(ctx, idRelatorio, fileName, workingPath, req)
 }
 
-// deliver mirrors the tail of the Python workers: record the processing date,
-// remove the working directory, then attach and email the PDF.
-func (w *Worker) deliver(idRelatorio, fileName, filePath, workingPath string, req Request, subject, attachmentName string) bool {
+// deliver records the processing date and cleans the working directory. The
+// PDF itself is already persisted in the report store by generate; clients are
+// notified through polling/SSE on /relatorios/processados and /relatorios/eventos.
+func (w *Worker) deliver(ctx context.Context, idRelatorio, fileName, workingPath string, req Request) bool {
+	_ = ctx
 	if err := w.Store.Save(idRelatorio, fileName); err != nil {
 		slog.Error("falha ao gravar data de processamento", "error", err)
 		return false
 	}
-	if err := os.RemoveAll(workingPath); err != nil {
-		slog.Warn("falha ao limpar diretório de trabalho", "path", workingPath, "error", err)
-	}
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		slog.Error("falha ao ler relatório para envio", "arquivo", filePath, "error", err)
-		return false
-	}
-	if w.Send == nil {
-		// Nothing will email the report; treat as failure to stay observable.
-		slog.Error("remetente de e-mail não configurado", "destinatario", req.Email)
-		return false
-	}
-	if err := w.Send(req.Email, subject, attachmentName, data); err != nil {
-		slog.Error("falha ao enviar relatório", "destinatario", req.Email, "error", err)
-		return false
+	if workingPath != "" {
+		if err := os.RemoveAll(workingPath); err != nil {
+			slog.Warn("falha ao limpar diretório de trabalho", "path", workingPath, "error", err)
+		}
 	}
 	return true
 }

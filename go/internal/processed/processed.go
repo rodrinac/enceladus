@@ -1,16 +1,19 @@
 // Package processed mirrors src/relatorios/relatorios.py: the list of
-// processed / in-flight reports shown by the frontend.
+// processed / in-flight reports shown by the frontend. Finished PDFs are
+// listed from the report store (S3 bucket when configured), so the history
+// survives restarts.
 package processed
 
 import (
+	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/rodrinac/enceladus/go/internal/config"
 	"github.com/rodrinac/enceladus/go/internal/jobstatus"
+	"github.com/rodrinac/enceladus/go/internal/reportstore"
 	"github.com/rodrinac/enceladus/go/internal/store"
 )
 
@@ -21,8 +24,8 @@ var (
 	fullISOPassiveDate  = "2006-01-02T15:04:05Z07:00"
 )
 
-// List assembles processed PDFs plus live jobs, sorted newest first.
-func List(cfg *config.Config, reportsDir string, dataStore store.DataStore, registry *jobstatus.Registry) ([]map[string]interface{}, error) {
+// List assembles stored PDFs plus live jobs, sorted newest first.
+func List(cfg *config.Config, reports reportstore.Storage, dataStore store.DataStore, registry *jobstatus.Registry) ([]map[string]interface{}, error) {
 	dates, err := dataStore.Dates()
 	if err != nil {
 		return nil, err
@@ -30,16 +33,17 @@ func List(cfg *config.Config, reportsDir string, dataStore store.DataStore, regi
 
 	produced := map[string]bool{}
 	relatorios := []map[string]interface{}{}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	for _, report := range cfg.Relatorios {
 		subdir := strings.TrimPrefix(strings.TrimPrefix(report.Path, "/"), "relatorios/")
-		folder := filepath.Join(reportsDir, subdir)
-
-		matches, globErr := filepath.Glob(filepath.Join(folder, "*.pdf"))
-		if globErr != nil {
+		keys, listErr := reports.List(ctx, subdir)
+		if listErr != nil {
 			continue
 		}
-		for _, match := range matches {
-			nomeBase := filepath.Base(match)
+		for _, key := range keys {
+			segments := strings.Split(key, "/")
+			nomeBase := segments[len(segments)-1]
 			partes := strings.Split(nomeBase, ".")
 			if len(partes) < 3 {
 				continue

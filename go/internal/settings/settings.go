@@ -17,21 +17,20 @@ type Settings struct {
 	DatasusMaxYearPath   string
 	PopulationDataPath   string
 	ReportsDir           string
+	ReportsBucket        string
+	ReportsPrefix        string
 	RscriptsDir          string
 	RedisDB              int
 	RedisHost            string
 	RedisPassword        string
 	RedisPort            int
-	SESConfigurationSet  string
-	SESRegion            string
-	SESSender            string
+	AWSRegion            string
 	Bind                 string
 	DatasusCacheMaxBytes uint64
 	DatasusCachePath     string
 }
 
 const defaultAppHome = "/var/lib/enceladus"
-const defaultSESSender = "Enceladus Big Data <enceladus.bigdata@hotmail.com>"
 const defaultRegion = "eu-west-1"
 
 func getenvInt(name string, fallback int) int {
@@ -81,14 +80,14 @@ func FromEnvironment() Settings {
 		DatasusMaxYearPath:   envPath("ENCELADUS_DATASUS_MAX_YEAR_PATH", filepath.Join(appHome, "data", "datasus-max-year.txt")),
 		PopulationDataPath:   envPath("ENCELADUS_POPULATION_DATA_PATH", filepath.Join(appHome, "data", "population.csv")),
 		ReportsDir:           filepath.Join(appHome, "relatorios"),
+		ReportsBucket:        strings.TrimSpace(os.Getenv("ENCELADUS_REPORTS_BUCKET")),
+		ReportsPrefix:        strings.Trim(strings.TrimSpace(os.Getenv("ENCELADUS_REPORTS_PREFIX")), "/"),
 		RscriptsDir:          filepath.Join(sourceRoot, "rscripts"),
 		RedisDB:              getenvInt("REDIS_DB", 0),
 		RedisHost:            os.Getenv("REDIS_HOST"),
 		RedisPassword:        os.Getenv("REDIS_PASSWORD"),
 		RedisPort:            getenvInt("REDIS_PORT", 6379),
-		SESConfigurationSet:  envOrEmpty("SES_CONFIGURATION_SET", "Default"),
-		SESRegion:            envOr("AWS_DEFAULT_REGION", defaultRegion),
-		SESSender:            envOr("SES_SENDER", defaultSESSender),
+		AWSRegion:            envOr("AWS_DEFAULT_REGION", defaultRegion),
 		Bind:                 os.Getenv("ENCELADUS_BIND"),
 		DatasusCacheMaxBytes: getenvUint64("ENCELADUS_DATASUS_CACHE_MAX_BYTES", 5_368_709_120),
 		DatasusCachePath:     envPath("ENCELADUS_DATASUS_CACHE_PATH", filepath.Join(appHome, "relatorios", ".cache", "datasus")),
