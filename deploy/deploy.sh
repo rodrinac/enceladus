@@ -67,7 +67,11 @@ redis_password=$(aws secretsmanager get-secret-value \
   --output text)
 
 umask 077
-cat > "$env_file" <<EOF
+# Write-then-rename so a failure mid-write (or an aborted heredoc expansion)
+# can never leave a truncated runtime.env behind: the previous release's
+# outage came from `cat >` truncating the file before `set -u` aborted.
+tmp_env="$env_file.new"
+cat > "$tmp_env" <<EOF
 APP_REF=$ref
 HOME=${HOME:-/root}
 AWS_DEFAULT_REGION=$region
@@ -84,12 +88,13 @@ REDIS_PASSWORD=$redis_password
 REDIS_SECRET_ARN=$REDIS_SECRET_ARN
 # Defaulted (not :?) so hosts bootstrapped before the S3 report store existed
 # — whose runtime.env has no such lines — deploy instead of dying on an
-# unbound variable under `set -u`. Empty means local-filesystem storage.
+# unbound variable with nounset mode on. Empty means local-filesystem storage.
 ENCELADUS_REPORTS_BUCKET=${ENCELADUS_REPORTS_BUCKET:-}
 ENCELADUS_REPORTS_PREFIX=${ENCELADUS_REPORTS_PREFIX:-}
 SOURCE_REF=$SOURCE_REF
 SOURCE_REPOSITORY=$SOURCE_REPOSITORY
 EOF
+mv "$tmp_env" "$env_file"
 echo "Redis password refreshed from Secrets Manager"
 echo "::endgroup::"
 
