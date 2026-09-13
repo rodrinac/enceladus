@@ -92,14 +92,80 @@ func (w *Worker) Exists(ctx context.Context, reportPath, fileName string) bool {
 // files only ever use expected names.
 var safeFileName = regexp.MustCompile(`^[A-Z]{2}(-[A-Z]{2})*\.\d{4}(-\d{2}-\d{2})?\.\d{4}(-\d{2}-\d{2})?\.pdf$`)
 
+var (
+	validStateToken = regexp.MustCompile(`^[A-Z]{2}$`)
+	validDate       = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	validYear       = regexp.MustCompile(`^\d{4}$`)
+	validRequestID  = regexp.MustCompile(`^[0-9a-fA-F-]{1,64}$`)
+)
+
+// sanitizeInputs allowlists every request-derived token before it reaches a
+// filesystem or command sink. States are UF codes, dates are ISO days or
+// years, and the request ID is the server-generated UUID.
+func sanitizeInputs(states []string, start, end, requestID string) error {
+	if len(states) == 0 {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	for _, state := range states {
+		if !validStateToken.MatchString(state) {
+			return fmt.Errorf("nome de relatório inválido")
+		}
+	}
+	if !validDate.MatchString(start) && !validYear.MatchString(start) {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	if !validDate.MatchString(end) && !validYear.MatchString(end) {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	if requestID == "" || !validRequestID.MatchString(requestID) ||
+		strings.Contains(requestID, "/") || strings.Contains(requestID, "\\") ||
+		strings.Contains(requestID, "..") {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	return nil
+}
+
+// joinInside resolves name inside dir and rejects escapes, so validated
+// tokens can never address files outside the reports directory.
+func joinInside(dir, folder, name string) (string, error) {
+	candidate := filepath.Join(folder, name)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("nome de relatório inválido")
+	}
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("nome de relatório inválido")
+	}
+	if absCandidate != absDir && !strings.HasPrefix(absCandidate, absDir+string(os.PathSeparator)) {
+		return "", fmt.Errorf("nome de relatório inválido")
+	}
+	rel, err := filepath.Rel(absDir, absCandidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("nome de relatório inválido")
+	}
+	return absCandidate, nil
+}
+
 // checkLocalPath rejects unexpected file names and paths escaping ReportsDir
 // before the R working files are touched.
 func (w *Worker) checkLocalPath(filePath string) error {
 	if !safeFileName.MatchString(filepath.Base(filePath)) {
 		return fmt.Errorf("nome de relatório inválido")
 	}
-	rel, err := filepath.Rel(w.ReportsDir, filePath)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	absDir, err := filepath.Abs(w.ReportsDir)
+	if err != nil {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	absCandidate, err := filepath.Abs(filePath)
+	if err != nil {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	if absCandidate != absDir && !strings.HasPrefix(absCandidate, absDir+string(os.PathSeparator)) {
+		return fmt.Errorf("nome de relatório inválido")
+	}
+	rel, err := filepath.Rel(absDir, absCandidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("nome de relatório inválido")
 	}
 	return nil
@@ -112,13 +178,28 @@ func (w *Worker) generate(ctx context.Context, key, filePath, workingPath, scrip
 	if exists, err := w.Reports.Exists(ctx, key); err == nil && exists {
 		return false, true, 0, "", nil
 	}
-	if err := w.checkLocalPath(filePath); err != nil {
+	if !safeFileName.MatchString(filepath.Base(filePath)) {
+		return false, false, 0, "", fmt.Errorf("nome de relatório inválido")
+	}
+	absDir, err := filepath.Abs(w.ReportsDir)
+	if err != nil {
+		return false, false, 0, "", fmt.Errorf("nome de relatório inválido")
+	}
+	absFile, err := filepath.Abs(filePath)
+	if err != nil || (absFile != absDir && !strings.HasPrefix(absFile, absDir+string(os.PathSeparator))) {
+		return false, false, 0, "", fmt.Errorf("nome de relatório inválido")
+	}
+	if rel, err := filepath.Rel(absDir, absFile); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false, false, 0, "", fmt.Errorf("nome de relatório inválido")
+	}
+	absWork, err := filepath.Abs(workingPath)
+	if err != nil || (absWork != absDir && !strings.HasPrefix(absWork, absDir+string(os.PathSeparator))) {
+		return false, false, 0, "", fmt.Errorf("nome de relatório inválido")
+	}
+	if err := os.MkdirAll(filepath.Dir(absFile), 0o755); err != nil {
 		return false, false, 0, "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil { // lgtm[go/path-injection] filePath is allowlisted by checkLocalPath and contained in ReportsDir
-		return false, false, 0, "", err
-	}
-	if err := os.MkdirAll(workingPath, 0o755); err != nil {
+	if err := os.MkdirAll(absWork, 0o755); err != nil {
 		return false, false, 0, "", err
 	}
 	code, output := w.Runner.Run(script, args)
@@ -127,7 +208,7 @@ func (w *Worker) generate(ctx context.Context, key, filePath, workingPath, scrip
 	if code != 0 {
 		return true, false, code, output, nil
 	}
-	data, err := os.ReadFile(filePath) // lgtm[go/path-injection] filePath is allowlisted by checkLocalPath and contained in ReportsDir
+	data, err := os.ReadFile(absFile)
 	if err != nil {
 		return true, false, code, output, err
 	}
@@ -147,11 +228,27 @@ func (w *Worker) DensidadeGeral(req Request) bool {
 		"estados", fmt.Sprint(states),
 		"intervalo", formatIntervalo(req.Start, req.End))
 
+	if err := sanitizeInputs(states, req.Start, req.End, req.RequestID); err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
 	folder := reportHome(w.ReportsDir, reportPath)
 	fileName := strings.Join(states, "-") + "." + req.Start + "." + req.End + ".pdf"
+	if !safeFileName.MatchString(fileName) {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID)
+		return false
+	}
 	key, _ := storageKey(reportPath, fileName)
-	filePath := filepath.Join(folder, fileName)
-	workingPath := filepath.Join(folder, req.RequestID)
+	filePath, err := joinInside(w.ReportsDir, folder, fileName)
+	if err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
+	workingPath, err := joinInside(w.ReportsDir, folder, req.RequestID)
+	if err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -186,11 +283,27 @@ func (w *Worker) Densidade(req Request) bool {
 		"estado", estado,
 		"intervalo", formatIntervalo(req.Start, req.End))
 
+	if err := sanitizeInputs([]string{estado}, req.Start, req.End, req.RequestID); err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
 	folder := reportHome(w.ReportsDir, reportPath)
 	fileName := estado + "." + req.Start + "." + req.End + ".pdf"
+	if !safeFileName.MatchString(fileName) {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID)
+		return false
+	}
 	key, _ := storageKey(reportPath, fileName)
-	filePath := filepath.Join(folder, fileName)
-	workingPath := filepath.Join(folder, req.RequestID)
+	filePath, err := joinInside(w.ReportsDir, folder, fileName)
+	if err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
+	workingPath, err := joinInside(w.ReportsDir, folder, req.RequestID)
+	if err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -220,11 +333,27 @@ func (w *Worker) CasosMensais(req Request) bool {
 		"estados", strings.Join(req.States, ", "),
 		"intervalo", formatIntervalo(req.Start, req.End))
 
+	if err := sanitizeInputs(req.States, req.Start, req.End, req.RequestID); err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
 	folder := reportHome(w.ReportsDir, reportPath)
 	fileName := strings.Join(req.States, "-") + "." + req.Start + "." + req.End + ".pdf"
+	if !safeFileName.MatchString(fileName) {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID)
+		return false
+	}
 	key, _ := storageKey(reportPath, fileName)
-	filePath := filepath.Join(folder, fileName)
-	workingPath := filepath.Join(folder, req.RequestID)
+	filePath, err := joinInside(w.ReportsDir, folder, fileName)
+	if err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
+	workingPath, err := joinInside(w.ReportsDir, folder, req.RequestID)
+	if err != nil {
+		slog.Error("falha ao gerar relatório", "relatorio", idRelatorio, "requisicao", req.RequestID, "error", err)
+		return false
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -250,12 +379,26 @@ func (w *Worker) CasosMensais(req Request) bool {
 // notified through polling/SSE on /relatorios/processados and /relatorios/eventos.
 func (w *Worker) deliver(ctx context.Context, idRelatorio, fileName, workingPath string, req Request) bool {
 	_ = ctx
+	if !safeFileName.MatchString(fileName) {
+		slog.Error("falha ao gravar data de processamento", "error", "nome de relatório inválido")
+		return false
+	}
 	if err := w.Store.Save(idRelatorio, fileName); err != nil {
 		slog.Error("falha ao gravar data de processamento", "error", err)
 		return false
 	}
 	if workingPath != "" {
-		if err := os.RemoveAll(workingPath); err != nil {
+		absDir, err := filepath.Abs(w.ReportsDir)
+		if err != nil {
+			slog.Warn("falha ao limpar diretório de trabalho", "path", workingPath, "error", err)
+			return true
+		}
+		absWork, err := filepath.Abs(workingPath)
+		if err != nil || (absWork != absDir && !strings.HasPrefix(absWork, absDir+string(os.PathSeparator))) {
+			slog.Warn("falha ao limpar diretório de trabalho", "path", workingPath)
+			return true
+		}
+		if err := os.RemoveAll(absWork); err != nil {
 			slog.Warn("falha ao limpar diretório de trabalho", "path", workingPath, "error", err)
 		}
 	}

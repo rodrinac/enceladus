@@ -84,12 +84,34 @@ func (l *Local) path(key string) (string, error) {
 	return joined, nil
 }
 
+func (l *Local) contained(p string) (string, error) {
+	absDir, err := filepath.Abs(l.Dir)
+	if err != nil {
+		return "", fmt.Errorf("chave de relatório inválida")
+	}
+	absCandidate, err := filepath.Abs(p)
+	if err != nil {
+		return "", fmt.Errorf("chave de relatório inválida")
+	}
+	if absCandidate != absDir && !strings.HasPrefix(absCandidate, absDir+string(os.PathSeparator)) {
+		return "", fmt.Errorf("chave de relatório inválida")
+	}
+	if rel, err := filepath.Rel(absDir, absCandidate); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("chave de relatório inválida")
+	}
+	return absCandidate, nil
+}
+
 func (l *Local) Exists(_ context.Context, key string) (bool, error) {
 	p, err := l.path(key)
 	if err != nil {
 		return false, err
 	}
-	_, err = os.Stat(p) // lgtm[go/path-injection] p is allowlisted by cleanKey and contained in Dir by path
+	safe, err := l.contained(p)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(safe)
 	if err == nil {
 		return true, nil
 	}
@@ -104,7 +126,11 @@ func (l *Local) Get(_ context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return os.ReadFile(p) // lgtm[go/path-injection] p is allowlisted by cleanKey and contained in Dir by path
+	safe, err := l.contained(p)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(safe)
 }
 
 func (l *Local) Put(_ context.Context, key string, data []byte, _ string) error {
@@ -112,10 +138,14 @@ func (l *Local) Put(_ context.Context, key string, data []byte, _ string) error 
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil { // lgtm[go/path-injection] p is allowlisted by cleanKey and contained in Dir by path
+	safe, err := l.contained(p)
+	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0o644) // lgtm[go/path-injection] p is allowlisted by cleanKey and contained in Dir by path
+	if err := os.MkdirAll(filepath.Dir(safe), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(safe, data, 0o644)
 }
 
 func (l *Local) List(_ context.Context, prefix string) ([]string, error) {
@@ -123,7 +153,11 @@ func (l *Local) List(_ context.Context, prefix string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	matches, err := filepath.Glob(filepath.Join(base, "*.pdf"))
+	safe, err := l.contained(base)
+	if err != nil {
+		return nil, err
+	}
+	matches, err := filepath.Glob(filepath.Join(safe, "*.pdf"))
 	if err != nil {
 		return nil, err
 	}

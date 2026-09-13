@@ -37,8 +37,9 @@ const (
 )
 
 var (
-	anoRegex  = regexp.MustCompile(`^\d{4}$`)
-	dataRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	anoRegex      = regexp.MustCompile(`^\d{4}$`)
+	dataRegex     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	downloadRegex = regexp.MustCompile(`^[A-Z]{2}(-[A-Z]{2})*\.\d{4}(-\d{2}-\d{2})?\.\d{4}(-\d{2}-\d{2})?\.pdf$`)
 )
 
 type Server struct {
@@ -390,17 +391,14 @@ func (s *Server) downloadPDF(reportID string) http.HandlerFunc {
 	_ = reportPath
 	return func(w http.ResponseWriter, r *http.Request) {
 		pathTail := r.PathValue("path")
-		if !isSafePath(pathTail) {
+		// Only a single allowlisted PDF base name may vary; sub-paths are
+		// rejected to keep storage keys inside the report folder.
+		if !downloadRegex.MatchString(pathTail) || !isSafePath(pathTail) ||
+			strings.Contains(filepath.ToSlash(pathTail), "/") {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 		key := reportstore.KeyForReport(reportPath, filepath.ToSlash(pathTail))
-		// Only the base name may vary; sub-paths are rejected to keep keys
-		// inside the report folder.
-		if strings.Contains(filepath.ToSlash(pathTail), "/") {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
 		data, err := s.Reports.Get(ctx, key)
