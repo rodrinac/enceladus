@@ -40,7 +40,7 @@
               src = ./go;
               name = "enceladus-go-src";
             };
-            vendorHash = "sha256-oBWdF1HU8KBW1QohdUVIuiKmHP/Bl2hfd74qOaRpbcc=";
+            vendorHash = "sha256-DZ6/9NYvYrtY/4WluOLRPEYtuCagxOrf3JscwrAjmo4=";
             subPackages = [
               "./cmd/enceladus-api"
               "./cmd/fetch-sim-archives"
